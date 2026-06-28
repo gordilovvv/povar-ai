@@ -33,10 +33,12 @@ export const selectPendingWebhookTasks = async (client: PoolClient, limit: numbe
     return result.rows;
 };
 
-export const deleteWebhookTask = async (client: PoolClient, id: string) => {
-    await client.query(format('delete from webhook_tasks where id = %L', id));
+export const deleteWebhookTasks = async (client: PoolClient, ids: string[]) => {
+    await client.query(format('delete from webhook_tasks where id = any(%L)', ids));
 };
 
-export const incrementWebhookTaskRetry = async (client: PoolClient, id: string) => {
-    await client.query(format('update webhook_tasks set retry = retry + 1 where id = %L', id));
+export const incrementWebhookTasksRetry = async (client: PoolClient, ids: string[]) => {
+    await client.query(
+        format('update webhook_tasks set retry = retry + 1 where id = any(%L)', ids),
+    );
 };

@@ -1,8 +1,8 @@
 import { handleChat } from './conversation.ts';
 import { pool } from './db/db.ts';
 import {
-    deleteWebhookTask,
-    incrementWebhookTaskRetry,
+    deleteWebhookTasks,
+    incrementWebhookTasksRetry,
     selectPendingWebhookTasks,
     type WebhookTaskStorage,
 } from './db/webhook-tasks.ts';
@@ -64,15 +64,21 @@ const run = async () => {
                     }
                 }
 
+                const failedIds: string[] = [];
+                const successIds: string[] = [];
+                for (const task of tasks) {
+                    if (failed.has(task.id)) {
+                        failedIds.push(task.id);
+                    } else {
+                        successIds.push(task.id);
+                    }
+                }
+
                 const finalizeClient = await pool.connect();
                 try {
-                    for (const task of tasks) {
-                        if (failed.has(task.id)) {
-                            await incrementWebhookTaskRetry(finalizeClient, task.id);
-                        } else {
-                            await deleteWebhookTask(finalizeClient, task.id);
-                        }
-                    }
+                    if (failedIds.length)
+                        await incrementWebhookTasksRetry(finalizeClient, failedIds);
+                    if (successIds.length) await deleteWebhookTasks(finalizeClient, successIds);
                 } finally {
                     finalizeClient.release();
                 }
