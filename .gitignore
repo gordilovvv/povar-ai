@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.esbuild/
+coverage/
+*.log
+*.tsbuildinfo
+
+# env / secrets
+.env
+.env.*
+!.env.example
+secrets/
+
+# OS
+.DS_Store

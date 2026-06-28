@@ -1,0 +1,38 @@
+{
+  "name": "sema-ai",
+  "version": "0.0.1",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "node --watch --env-file=.env.dev src/webhook.ts",
+    "dev:worker": "node --watch --env-file=.env.dev src/worker.ts",
+    "prod": "node --env-file=.env.prod src/webhook.ts",
+    "prod:worker": "node --env-file=.env.prod src/worker.ts",
+    "test": "node --test 'tests/**/*.test.ts'",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write ."
+  },
+  "dependencies": {
+    "@whatwg-node/server": "^0.11.0",
+    "dayjs": "^1.11.21",
+    "itty-router": "^5.0.18",
+    "pg": "^8.13.1",
+    "pg-format": "^1.0.4",
+    "pino": "^9.5.0",
+    "ulid": "^3.0.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.1",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.11.11",
+    "@types/pg-format": "^1.0.5",
+    "pino-pretty": "^13.0.0",
+    "typescript": "^5.8.2"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

@@ -1,0 +1,9 @@
+services:
+  api:
+    image: sema-ai:latest
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PORT}:${PORT}"
+    env_file: .env
+    command: ["node", "src/index.ts"]
