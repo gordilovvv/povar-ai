@@ -60,6 +60,7 @@ create table wa_messages (
     text text,
     owner text not null, -- ai | guest | marketing | sema
     status text, -- idle | sent | delivered | read | failed
+    worker_state text, -- pending | processing | failed | done (только для owner='guest')
     concurrency_version integer not null default 0,
     sent_at timestamp with time zone
 );

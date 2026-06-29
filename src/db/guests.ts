@@ -20,13 +20,17 @@ export const selectGuestByPhone = async (client: PoolClient, waPhone: string) =>
     return result.rows.length ? result.rows[0] : null;
 };
 
-export const insertGuest = async (client: PoolClient, guest: GuestStorage) => {
-    await client.query(
+export const insertGuest = async (
+    client: PoolClient,
+    guest: GuestStorage,
+): Promise<GuestStorage> => {
+    const result = await client.query<GuestStorage>(
         format(
             `insert into guests
                 (id, wa_phone, first_name, last_name, instagram_url, came_from, came_at)
             values
-                (%L, %L, %L, %L, %L, %L, %L)`,
+                (%L, %L, %L, %L, %L, %L, %L)
+            returning *`,
             guest.id,
             guest.wa_phone,
             guest.first_name,
@@ -36,4 +40,9 @@ export const insertGuest = async (client: PoolClient, guest: GuestStorage) => {
             guest.came_at,
         ),
     );
+    const row = result.rows[0];
+    if (!row) {
+        throw new Error('insertGuest returned no row');
+    }
+    return row;
 };

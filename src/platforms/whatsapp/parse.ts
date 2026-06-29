@@ -4,6 +4,7 @@ const messageSchema = z.looseObject({
     id: z.string(),
     from: z.string(),
     type: z.string(),
+    timestamp: z.string().optional(),
     text: z.looseObject({ body: z.string() }).optional(),
     referral: z.looseObject({ source_id: z.string() }).optional(),
 });
