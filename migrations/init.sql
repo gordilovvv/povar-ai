@@ -50,7 +50,8 @@ create table wa_chats (
     wa_phone text primary key,
     guest_id text,
     last_sent_message_at timestamp with time zone,
-    last_received_message_at timestamp with time zone
+    last_received_message_at timestamp with time zone,
+    worker_state text -- null | processing
 );
 
 create table wa_messages (
@@ -59,15 +60,7 @@ create table wa_messages (
     wa_chat_phone text not null references wa_chats (wa_phone),
     text text,
     owner text not null, -- ai | guest | marketing | sema
-    status text, -- idle | sent | delivered | read | failed
+    status text, -- idle | sent | delivered | read | failed | received | processed
     concurrency_version integer not null default 0,
     sent_at timestamp with time zone
-);
-
--- Webhooks-queue
-create table webhook_tasks (
-    id text primary key,
-    platform text not null, -- whatsapp | instagram
-    data jsonb not null,
-    retry integer not null default 0
 );

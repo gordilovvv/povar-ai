@@ -7,6 +7,7 @@ export interface WaChatStorage {
     guest_id: string | null;
     last_sent_message_at: string | null;
     last_received_message_at: string | null;
+    worker_state: string | null;
 }
 
 export const selectWaChat = async (client: PoolClient, waPhone: string) => {
@@ -35,6 +36,35 @@ export const upsertWaChat = async (
             waPhone,
             guestId,
             toDateTime(lastReceivedMessageAt),
+        ),
+    );
+};
+
+export const touchWaChat = async (client: PoolClient, waPhone: string) => {
+    await client.query(
+        format(
+            `insert into wa_chats (wa_phone, last_received_message_at)
+            values (%L, now())
+            on conflict (wa_phone) do update
+                set last_received_message_at = greatest(
+                    wa_chats.last_received_message_at,
+                    now()
+                )`,
+            waPhone,
+        ),
+    );
+};
+
+export const setWorkerState = async (
+    client: PoolClient,
+    waPhone: string,
+    workerState: string | null,
+) => {
+    await client.query(
+        format(
+            'update wa_chats set worker_state = %L where wa_phone = %L',
+            workerState,
+            waPhone,
         ),
     );
 };

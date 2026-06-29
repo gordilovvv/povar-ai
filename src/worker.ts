@@ -1,130 +1,127 @@
-import { handleChatUpdate, handleMessageStatusUpdate } from './conversation.ts';
+import { ulid } from 'ulid';
 import { pool } from './db/db.ts';
 import {
-    deleteWebhookTasks,
-    incrementWebhookTasksRetry,
-    selectPendingWebhookTasks,
-    type WebhookTaskStorage,
-} from './db/webhook-tasks.ts';
+    claimChatMessages,
+    selectWaChatMessages,
+    updateMessagesStatus,
+    type WaMessageStorage,
+} from './db/wa-messages.ts';
+import { setWorkerState } from './db/wa-chats.ts';
+import { insertGuest, selectGuestByPhone } from './db/guests.ts';
+import { selectActiveParties } from './db/party.ts';
+import { selectGuestlistByGuest } from './db/guestlist.ts';
+import { agent } from './intelligence/agent.ts';
 import { sleep } from './lib/sleep.ts';
-import { payloadSchema, type WaMessage, type WaStatus } from './platforms/whatsapp/parse.ts';
+import { getDubaiTime } from './lib/time.ts';
 
-const POLL_INTERVAL_MS = 3_000;
+const MAX_CONCURRENT_CHATS = 8;
+const CONTEXT_MESSAGE_LIMIT = 50;
 
 let running = false;
 
-// TODO неверный он остановится для всех остальный сообщений и людей (цикл поправить)
-// TODO: Для надёжного «человеческого» поведения нужно осознанное окно: например, у чата держать last_message_at, и обрабатывать чат только если прошло N секунд тишины.
+const processChat = async (phone: string) => {
+    const startedAt = process.hrtime();
+
+    const ctxClient = await pool.connect();
+    let guest;
+    let parties;
+    let guestlist;
+    let messages: WaMessageStorage[];
+    try {
+        guest = await selectGuestByPhone(ctxClient, phone);
+        if (!guest) {
+            await insertGuest(ctxClient, {
+                id: ulid(),
+                wa_phone: phone,
+                first_name: null,
+                last_name: null,
+                instagram_url: null,
+                came_from: null,
+                came_at: null,
+            });
+            guest = await selectGuestByPhone(ctxClient, phone);
+        }
+        parties = await selectActiveParties(ctxClient);
+        guestlist = await selectGuestlistByGuest(ctxClient, guest!.id);
+        const history = await selectWaChatMessages(ctxClient, phone, null, CONTEXT_MESSAGE_LIMIT);
+        messages = history.reverse();
+    } finally {
+        ctxClient.release();
+    }
+
+    if (!guest) {
+        await resetWorkerState(phone);
+        return;
+    }
+
+    const receivedIds = messages.filter((m) => m.status === 'received').map((m) => m.id);
+
+    try {
+        await agent.do({
+            guest,
+            messages,
+            parties,
+            ownedGustlist: guestlist,
+            now: getDubaiTime(),
+        });
+
+        const finClient = await pool.connect();
+        try {
+            if (receivedIds.length) {
+                await updateMessagesStatus(finClient, receivedIds, 'processed');
+            }
+            await setWorkerState(finClient, phone, null);
+        } finally {
+            finClient.release();
+        }
+    } catch (e) {
+        console.error(`[worker] agent failed for ${phone}`, e);
+
+        const failClient = await pool.connect();
+        try {
+            await updateMessagesStatus(failClient, messages.map((m) => m.id), 'received');
+            await setWorkerState(failClient, phone, null);
+        } finally {
+            failClient.release();
+        }
+    }
+
+    const [seconds, nanos] = process.hrtime(startedAt);
+    console.log(
+        `[worker] chat ${phone}: ${messages.length} msg in ${seconds}s ${Math.round(nanos / 1e6)}ms`,
+    );
+};
+
+const resetWorkerState = async (phone: string) => {
+    const client = await pool.connect();
+    try {
+        await setWorkerState(client, phone, null);
+    } finally {
+        client.release();
+    }
+};
+
 const run = async () => {
     while (running) {
         try {
             const client = await pool.connect();
-            let tasks: WebhookTaskStorage[];
+            let rows: WaMessageStorage[];
             try {
-                tasks = await selectPendingWebhookTasks(client, 10);
+                rows = await claimChatMessages(client, MAX_CONCURRENT_CHATS);
             } finally {
                 client.release();
             }
 
-            if (!tasks.length) {
-                await sleep(POLL_INTERVAL_MS);
-                continue;
-            }
-
-            // склейка: сообщения нескольких вебхуков одного номера → один чат
-            const chats = new Map<string, { messages: WaMessage[]; taskIds: Set<string> }>();
-            const statuses: WaStatus[] = [];
-            const statusTaskIds = new Set<string>();
-            const failed = new Set<string>();
-            for (const task of tasks) {
-                let payload: ReturnType<typeof payloadSchema.parse>;
-                try {
-                    payload = payloadSchema.parse(task.data);
-                } catch (error) {
-                    console.error(`parse failed for task ${task.id}`, error);
-                    failed.add(task.id);
-                    continue;
-                }
-
-                const messages = payload.entry.flatMap((entry) =>
-                    entry.changes.flatMap((change) => change.value.messages ?? []),
+            const phones = new Set(rows.map((r) => r.wa_chat_phone));
+            for (const phone of phones) {
+                processChat(phone).catch((e) =>
+                    console.error(`[worker] unhandled error for ${phone}`, e),
                 );
-                for (const message of messages) {
-                    const chat = chats.get(message.from) ?? {
-                        messages: [],
-                        taskIds: new Set(),
-                    };
-                    chat.messages.push(message);
-                    chat.taskIds.add(task.id);
-                    chats.set(message.from, chat);
-                }
-
-                const taskStatuses = payload.entry.flatMap((entry) =>
-                    entry.changes.flatMap((change) => change.value.statuses ?? []),
-                );
-                if (taskStatuses.length) {
-                    statuses.push(...taskStatuses);
-                    statusTaskIds.add(task.id);
-                }
             }
-
-            // TODO instagrm
-            for (const [phone, chat] of chats) {
-                try {
-                    const startedAt = process.hrtime();
-                    await handleChatUpdate(phone, chat.messages);
-                    const [seconds, nanos] = process.hrtime(startedAt);
-                    console.log(
-                        `[worker] chat ${phone}: ${chat.messages.length} msg, ${chat.taskIds.size} tasks in ${seconds}s ${Math.round(nanos / 1e6)}ms`,
-                    );
-                } catch (error) {
-                    console.error(`handleChat failed for ${phone}`, error);
-                    for (const id of chat.taskIds) {
-                        failed.add(id);
-                    }
-                }
-            }
-
-            if (statuses.length) {
-                try {
-                    const startedAt = process.hrtime();
-                    await handleMessageStatusUpdate(statuses);
-                    const [seconds, nanos] = process.hrtime(startedAt);
-                    console.log(
-                        `[worker] statuses: ${statuses.length} upd, ${statusTaskIds.size} tasks in ${seconds}s ${Math.round(nanos / 1e6)}ms`,
-                    );
-                } catch (error) {
-                    console.error('handleStatus failed', error);
-                    for (const id of statusTaskIds) {
-                        failed.add(id);
-                    }
-                }
-            }
-
-            const failedIds: string[] = [];
-            const successIds: string[] = [];
-            for (const task of tasks) {
-                if (failed.has(task.id)) {
-                    failedIds.push(task.id);
-                } else {
-                    successIds.push(task.id);
-                }
-            }
-
-            const finalizeClient = await pool.connect();
-            try {
-                if (failedIds.length) {
-                    await incrementWebhookTasksRetry(finalizeClient, failedIds);
-                }
-                if (successIds.length) {
-                    await deleteWebhookTasks(finalizeClient, successIds);
-                }
-            } finally {
-                finalizeClient.release();
-            }
-        } catch (error) {
-            console.error('worker loop failed', error);
-            await sleep(POLL_INTERVAL_MS);
+        } catch (e) {
+            console.error('[worker] loop error', e);
+        } finally {
+            await sleep(1000);
         }
     }
 };

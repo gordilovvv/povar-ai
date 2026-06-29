@@ -3,7 +3,15 @@ import format from 'pg-format';
 import { z } from 'zod';
 import { toDateTime } from '../lib/fmt.ts';
 
-export const waMessageStatusSchema = z.enum(['idle', 'sent', 'delivered', 'read', 'failed']);
+export const waMessageStatusSchema = z.enum([
+    'idle',
+    'sent',
+    'delivered',
+    'read',
+    'failed',
+    'received',
+    'processed',
+]);
 type WaMessageStatus = z.infer<typeof waMessageStatusSchema>;
 
 export interface WaMessageStorage {
@@ -65,6 +73,20 @@ export const updateWaMessageStatus = async (
     return result.rows.length ? result.rows[0] : null;
 };
 
+export const setWaMessageStatus = async (
+    client: PoolClient,
+    waMessageId: string,
+    status: WaMessageStatus,
+) => {
+    await client.query(
+        format(
+            'update wa_messages set status = %L where wa_message_id = %L',
+            status,
+            waMessageId,
+        ),
+    );
+};
+
 export const selectWaChatMessages = async (
     client: PoolClient,
     waChatPhone: string,
@@ -78,6 +100,59 @@ export const selectWaChatMessages = async (
             lastId,
             lastId,
             limit,
+        ),
+    );
+    return result.rows;
+};
+
+export const updateMessagesStatus = async (
+    client: PoolClient,
+    ids: string[],
+    status: WaMessageStatus,
+) => {
+    await client.query(
+        `update wa_messages set status = $1 where id = any($2::text[])`,
+        [status, ids],
+    );
+};
+
+export const claimChatMessages = async (client: PoolClient, maxConcurrent: number) => {
+    const result = await client.query<WaMessageStorage>(
+        format(
+            `with current as (
+                select count(*)::int as cnt from wa_chats where worker_state = 'processing'
+            ),
+            ready as (
+                select wa_chat_phone
+                from wa_messages
+                where status = 'received'
+                group by wa_chat_phone
+                having max(sent_at) <= now() - interval '5' second
+                order by max(sent_at) asc
+                limit greatest(0, %L - (select cnt from current))
+            ),
+            locked as (
+                update wa_chats
+                set worker_state = 'processing'
+                where wa_phone in (select wa_chat_phone from ready)
+                    and worker_state is distinct from 'processing'
+                returning wa_phone
+            )
+            update wa_messages
+            set status = 'processed'
+            from locked
+            where wa_messages.wa_chat_phone = locked.wa_phone
+                and wa_messages.status = 'received'
+            returning
+                wa_messages.id,
+                wa_messages.wa_message_id,
+                wa_messages.wa_chat_phone,
+                wa_messages.text,
+                wa_messages.owner,
+                wa_messages.status,
+                wa_messages.concurrency_version,
+                wa_messages.sent_at`,
+            maxConcurrent,
         ),
     );
     return result.rows;

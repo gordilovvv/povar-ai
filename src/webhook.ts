@@ -3,8 +3,10 @@ import { createServerAdapter } from '@whatwg-node/server';
 import { IttyRouter, type RequestHandler, status, text } from 'itty-router';
 import { ulid } from 'ulid';
 import { env } from '../environment.ts';
-import { pool } from './db/db.ts';
-import { insertWebhookTask } from './db/webhook-tasks.ts';
+import { UNIQUE_ERROR_CODE, pool } from './db/db.ts';
+import { insertWaMessage, setWaMessageStatus } from './db/wa-messages.ts';
+import { touchWaChat } from './db/wa-chats.ts';
+import { payloadSchema } from './platforms/whatsapp/parse.ts';
 import { verifySignature } from './platforms/whatsapp/signature.ts';
 
 const handleVerifyWebhook: RequestHandler = (request) => {
@@ -25,21 +27,55 @@ const handleWebhook: RequestHandler = async (request) => {
     try {
         body = JSON.parse(raw);
     } catch {
-        console.error(`Failed to parse body: ${raw}`);
         return status(200);
     }
 
-    // ручка только пишет в очередь, разбирает воркер
+    const payload = payloadSchema.safeParse(body);
+    if (!payload.success) {
+        return status(200);
+    }
+
     const client = await pool.connect();
     try {
-        await insertWebhookTask(client, ulid(), 'whatsapp', body);
-        return status(200);
-    } catch (error) {
-        console.error(error);
-        return status(500);
+        for (const entry of payload.data.entry) {
+            for (const change of entry.changes) {
+                const value = change.value;
+
+                if (value.statuses) {
+                    for (const s of value.statuses) {
+                        await setWaMessageStatus(client, s.id, s.status as 'sent' | 'delivered' | 'read' | 'failed');
+                    }
+                }
+
+                if (value.messages) {
+                    for (const msg of value.messages) {
+                        try {
+                            await insertWaMessage(client, {
+                                id: ulid(),
+                                wa_message_id: msg.id,
+                                wa_chat_phone: msg.from,
+                                text: msg.text?.body ?? null,
+                                owner: 'guest',
+                                status: 'received',
+                                concurrency_version: 0,
+                                sent_at: new Date(),
+                            });
+                            await touchWaChat(client, msg.from);
+                        } catch (e) {
+                            if ((e as { code: string }).code === UNIQUE_ERROR_CODE) {
+                                continue;
+                            }
+                            throw e;
+                        }
+                    }
+                }
+            }
+        }
     } finally {
         client.release();
     }
+
+    return status(200);
 };
 
 const router = IttyRouter();
