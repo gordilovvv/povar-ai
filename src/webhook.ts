@@ -1,4 +1,3 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import { createServerAdapter } from '@whatwg-node/server';
 import { IttyRouter, type RequestHandler, status, text } from 'itty-router';
@@ -6,14 +5,7 @@ import { ulid } from 'ulid';
 import { env } from '../environment.ts';
 import { pool } from './db/db.ts';
 import { insertWebhookTask } from './db/webhook-tasks.ts';
-
-const verifySignature = (raw: string, header: string | null) => {
-    if (!header) return false;
-    const expected = `sha256=${createHmac('sha256', env.WA_SECRET).update(raw).digest('hex')}`;
-    const a = Buffer.from(header);
-    const b = Buffer.from(expected);
-    return a.length === b.length && timingSafeEqual(a, b);
-};
+import { verifySignature } from './platforms/whatsapp/signature.ts';
 
 const handleVerifyWebhook: RequestHandler = (request) => {
     const query = request.query;

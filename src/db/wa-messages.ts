@@ -1,7 +1,10 @@
 import type { PoolClient } from 'pg';
 import format from 'pg-format';
+import { z } from 'zod';
+import { toDateTime } from '../lib/fmt.ts';
 
-type WaMessageStatus = 'idle' | 'sent' | 'delivered' | 'read' | 'failed';
+export const waMessageStatusSchema = z.enum(['idle', 'sent', 'delivered', 'read', 'failed']);
+type WaMessageStatus = z.infer<typeof waMessageStatusSchema>;
 
 export interface WaMessageStorage {
     id: string;
@@ -13,6 +16,27 @@ export interface WaMessageStorage {
     concurrency_version: number;
     sent_at: string;
 }
+
+type WaMessageInsert = Omit<WaMessageStorage, 'sent_at'> & { sent_at: Date };
+
+export const insertWaMessage = async (client: PoolClient, message: WaMessageInsert) => {
+    await client.query(
+        format(
+            `insert into wa_messages
+                (id, wa_message_id, wa_chat_phone, text, owner, status, concurrency_version, sent_at)
+            values
+                (%L, %L, %L, %L, %L, %L, %L, %L)`,
+            message.id,
+            message.wa_message_id,
+            message.wa_chat_phone,
+            message.text,
+            message.owner,
+            message.status,
+            message.concurrency_version,
+            toDateTime(message.sent_at),
+        ),
+    );
+};
 
 export const selectWaMessage = async (client: PoolClient, waMessageId: string) => {
     const result = await client.query<WaMessageStorage>(

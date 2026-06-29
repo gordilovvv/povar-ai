@@ -26,7 +26,7 @@ create table party_time (
 -- Guests (users)
 create table guests (
     id text primary key,
-    wa_phone text,
+    wa_phone text unique,
     first_name text,
     last_name text,
     instagram_url text,
