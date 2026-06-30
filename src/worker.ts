@@ -1,7 +1,6 @@
 import { pool } from './db/db.ts';
 import { selectGuestlistByGuest } from './db/guestlist.ts';
 import { selectGuestByPhone } from './db/guests.ts';
-import { selectActiveParties } from './db/party.ts';
 import {
     selectWaChatMessages,
     updateProcessingToFailed,
@@ -78,13 +77,12 @@ const buildChatContext = async (phone: string): Promise<ChatContext> => {
         if (!guest) {
             throw new Error(`Unknown guest ${phone}`);
         }
-        const parties = await selectActiveParties(client);
         const messages = (
             await selectWaChatMessages(client, phone, null, MESSAGES_HISTORY_LIMIT)
         ).reverse(); // последние N, разворот в хронологию
         const ownedGuestlist = await selectGuestlistByGuest(client, guest.id);
         const now = getDubaiTime().format('YYYY-MM-DD HH:mm:ss');
-        return { guest, parties, messages, ownedGuestlist, now };
+        return { guest, messages, ownedGuestlist, now };
     } finally {
         client.release();
     }

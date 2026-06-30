@@ -37,3 +37,29 @@ export const insertGuest = async (client: PoolClient, guest: GuestStorage) => {
         ),
     );
 };
+
+export const updateGuestProfile = async (
+    client: PoolClient,
+    id: string,
+    patch: {
+        first_name?: string | undefined;
+        last_name?: string | undefined;
+        instagram_url?: string | undefined;
+    },
+) => {
+    const result = await client.query<GuestStorage>(
+        format(
+            `update guests set
+                first_name = coalesce(%L, first_name),
+                last_name = coalesce(%L, last_name),
+                instagram_url = coalesce(%L, instagram_url)
+            where id = %L
+            returning *`,
+            patch.first_name ?? null,
+            patch.last_name ?? null,
+            patch.instagram_url ?? null,
+            id,
+        ),
+    );
+    return result.rows.length ? result.rows[0] : null;
+};

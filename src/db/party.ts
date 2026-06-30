@@ -14,6 +14,22 @@ export interface PartyAdStorage {
     source_ad_id: string;
 }
 
+export interface PartyTimeStorage {
+    party_id: string;
+    party_start_at: string;
+    free_entry_before: string | null;
+}
+
+export const selectActivePartyTimes = async (client: PoolClient) => {
+    const result = await client.query<PartyTimeStorage>(
+        `select party_time.*
+        from party_time
+        where party_time.party_start_at >= now() - interval '6 hours'
+        order by party_time.party_start_at`,
+    );
+    return result.rows;
+};
+
 export const selectActiveParties = async (client: PoolClient) => {
     const result = await client.query<PartyStorage>(
         `select distinct party.*
