@@ -5,6 +5,7 @@ export const environmentSchema = z.object({
     DATABASE_URL: z.string(),
     WA_TOKEN: z.string(),
     WA_SECRET: z.string(),
+    WA_PHONE_ID: z.string(),
 });
 
 export type Environment = z.infer<typeof environmentSchema>;
