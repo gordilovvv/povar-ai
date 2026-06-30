@@ -130,3 +130,9 @@ export const updateWaMessagesWorkerStatus = async (
         format('update wa_messages set worker_status = %L where id = any(%L)', workerStatus, ids),
     );
 };
+
+export const updateProcessingToFailed = async (client: PoolClient) => {
+    await client.query(
+        "update wa_messages set worker_status = 'failed' where worker_status = 'processing'",
+    );
+};

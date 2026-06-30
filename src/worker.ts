@@ -4,6 +4,7 @@ import { selectGuestByPhone } from './db/guests.ts';
 import { selectActiveParties } from './db/party.ts';
 import {
     selectWaChatMessages,
+    updateProcessingToFailed,
     updateWaMessagesToProcessing,
     updateWaMessagesWorkerStatus,
     type WaMessageStorage,
@@ -67,13 +68,7 @@ const handleChat = async (phone: string, messageIds: string[]) => {
         workerStatus = 'failed';
     }
 
-    const client = await pool.connect();
-    try {
-        await updateWaMessagesWorkerStatus(client, messageIds, workerStatus);
-        console.log(`[worker] chat ${phone}: ${messageIds.length} msg → ${workerStatus}`);
-    } finally {
-        client.release();
-    }
+    await cleanChatMessagesStatus(phone, messageIds, workerStatus);
 };
 
 const buildChatContext = async (phone: string): Promise<ChatContext> => {
@@ -94,6 +89,49 @@ const buildChatContext = async (phone: string): Promise<ChatContext> => {
         client.release();
     }
 };
+
+const CLEAN_STATUS_RETRIES = 30;
+const CLEAN_STATUS_RETRY_BASE_MS = 100;
+const CLEAN_STATUS_RETRY_MAX_MS = 10_000;
+
+// Дочищает статусы сообщений
+const cleanChatMessagesStatus = async (
+    phone: string,
+    messageIds: string[],
+    workerStatus: 'processed' | 'failed',
+    attempt = 1,
+    timeout = CLEAN_STATUS_RETRY_BASE_MS,
+): Promise<void> => {
+    try {
+        const client = await pool.connect();
+        try {
+            await updateWaMessagesWorkerStatus(client, messageIds, workerStatus);
+        } finally {
+            client.release();
+        }
+        console.log(`[worker] chat ${phone}: ${messageIds.length} msg → ${workerStatus}`);
+    } catch (error) {
+        if (attempt >= CLEAN_STATUS_RETRIES) {
+            console.error(
+                `[worker] chat ${phone} clean status exhausted, left in processing`,
+                error,
+            );
+            return;
+        }
+        console.error(`[worker] chat ${phone} clean status attempt ${attempt} failed`, error);
+        await sleep(timeout);
+        const nextTimeout = Math.min(timeout * 2, CLEAN_STATUS_RETRY_MAX_MS);
+        return cleanChatMessagesStatus(phone, messageIds, workerStatus, attempt + 1, nextTimeout);
+    }
+};
+
+// При внезапном выключении, убираем зависшие сообщения
+const client = await pool.connect();
+try {
+    await updateProcessingToFailed(client);
+} finally {
+    client.release();
+}
 
 running = true;
 void run();
