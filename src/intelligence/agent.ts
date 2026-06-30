@@ -1,3 +1,16 @@
+import type { PartyGuestlistStorage } from '../db/guestlist.ts';
+import type { GuestStorage } from '../db/guests.ts';
+import type { PartyStorage } from '../db/party.ts';
+import type { WaMessageStorage } from '../db/wa-messages.ts';
+
+export interface ChatContext {
+    guest: GuestStorage;
+    messages: WaMessageStorage[];
+    parties: PartyStorage[];
+    ownedGuestlist: PartyGuestlistStorage[];
+    now: string;
+}
+
 export const agent = new (class Agent {
     // - system prompt — кто он, тон, флоу (правила из CLAUDE.md/Figma)
     // - tools — список ручек (описание + zod-схема), которые отдаём Claude
@@ -5,7 +18,7 @@ export const agent = new (class Agent {
     // - сам loop — выше
 
     // agentic loop
-    do() {
+    do(_context: ChatContext) {
         // messages = собрать из контекста (история + факты)
         // loop:
         //     ответ = вызов Claude (messages + список tools)

@@ -1,7 +1,16 @@
 import type { PoolClient } from 'pg';
 import format from 'pg-format';
+import { z } from 'zod';
+import { toDateTime } from '../lib/fmt.ts';
 
-type WaMessageStatus = 'idle' | 'sent' | 'delivered' | 'read' | 'failed';
+export const waMessageStatusSchema = z.enum(['idle', 'sent', 'delivered', 'read', 'failed']);
+
+type WaMessageStatus = z.infer<typeof waMessageStatusSchema>;
+type WaWorkerStatus = 'need_processed' | 'processing' | 'processed' | 'failed';
+
+export const waMessageStatusRank: Record<WaMessageStatus, number> = Object.fromEntries(
+    waMessageStatusSchema.options.map((status, index) => [status, index]),
+) as Record<WaMessageStatus, number>;
 
 export interface WaMessageStorage {
     id: string;
@@ -10,9 +19,32 @@ export interface WaMessageStorage {
     text: string | null;
     owner: string;
     status: WaMessageStatus;
+    worker_status: WaWorkerStatus | null;
     concurrency_version: number;
     sent_at: string;
 }
+
+type WaMessageInsert = Omit<WaMessageStorage, 'sent_at'> & { sent_at: Date };
+
+export const insertWaMessage = async (client: PoolClient, message: WaMessageInsert) => {
+    await client.query(
+        format(
+            `insert into wa_messages
+                (id, wa_message_id, wa_chat_phone, text, owner, status, worker_status, concurrency_version, sent_at)
+            values
+                (%L, %L, %L, %L, %L, %L, %L, %L, %L)`,
+            message.id,
+            message.wa_message_id,
+            message.wa_chat_phone,
+            message.text,
+            message.owner,
+            message.status,
+            message.worker_status,
+            message.concurrency_version,
+            toDateTime(message.sent_at),
+        ),
+    );
+};
 
 export const selectWaMessage = async (client: PoolClient, waMessageId: string) => {
     const result = await client.query<WaMessageStorage>(
@@ -57,4 +89,44 @@ export const selectWaChatMessages = async (
         ),
     );
     return result.rows;
+};
+
+// Атомарно захватываем готовые чаты и помечаем ВСЕ их сообщения processing.
+export const updateWaMessagesToProcessing = async (
+    client: PoolClient,
+    beforeSentAt: string,
+    chatLimit: number,
+) => {
+    const result = await client.query<WaMessageStorage>(
+        format(
+            `update wa_messages
+                set worker_status = 'processing'
+            where worker_status = 'need_processed'
+                and wa_chat_phone in (
+                    select wa_chat_phone from wa_messages
+                    where worker_status = 'need_processed'
+                        and wa_chat_phone not in (
+                            select wa_chat_phone from wa_messages where worker_status = 'processing'
+                        )
+                    group by wa_chat_phone
+                    having max(sent_at) <= %L
+                    order by min(sent_at)
+                    limit %L
+                )
+            returning *`,
+            beforeSentAt,
+            chatLimit,
+        ),
+    );
+    return result.rows;
+};
+
+export const updateWaMessagesWorkerStatus = async (
+    client: PoolClient,
+    ids: string[],
+    workerStatus: WaWorkerStatus,
+) => {
+    await client.query(
+        format('update wa_messages set worker_status = %L where id = any(%L)', workerStatus, ids),
+    );
 };

@@ -1,19 +1,22 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import { createServerAdapter } from '@whatwg-node/server';
 import { IttyRouter, type RequestHandler, status, text } from 'itty-router';
+import type { PoolClient } from 'pg';
 import { ulid } from 'ulid';
 import { env } from '../environment.ts';
-import { pool } from './db/db.ts';
-import { insertWebhookTask } from './db/webhook-tasks.ts';
-
-const verifySignature = (raw: string, header: string | null) => {
-    if (!header) return false;
-    const expected = `sha256=${createHmac('sha256', env.WA_SECRET).update(raw).digest('hex')}`;
-    const a = Buffer.from(header);
-    const b = Buffer.from(expected);
-    return a.length === b.length && timingSafeEqual(a, b);
-};
+import { pool, UNIQUE_ERROR_CODE } from './db/db.ts';
+import { type GuestStorage, insertGuest, selectGuestByPhone } from './db/guests.ts';
+import { upsertWaChat } from './db/wa-chats.ts';
+import {
+    insertWaMessage,
+    selectWaMessage,
+    updateWaMessageStatus,
+    waMessageStatusRank,
+    waMessageStatusSchema,
+} from './db/wa-messages.ts';
+import { toDateTime } from './lib/fmt.ts';
+import { payloadSchema } from './platforms/whatsapp/parse.ts';
+import { verifySignature } from './platforms/whatsapp/signature.ts';
 
 const handleVerifyWebhook: RequestHandler = (request) => {
     const query = request.query;
@@ -37,16 +40,108 @@ const handleWebhook: RequestHandler = async (request) => {
         return status(200);
     }
 
-    // ручка только пишет в очередь, разбирает воркер
+    const parsed = payloadSchema.safeParse(body);
+    if (!parsed.success) {
+        console.error('webhook payload parse failed', parsed.error);
+        return status(200);
+    }
+
+    const messages = parsed.data.entry.flatMap((entry) =>
+        entry.changes.flatMap((change) => change.value.messages ?? []),
+    );
+    const statuses = parsed.data.entry.flatMap((entry) =>
+        entry.changes.flatMap((change) => change.value.statuses ?? []),
+    );
+
+    const now = new Date();
     const client = await pool.connect();
     try {
-        await insertWebhookTask(client, ulid(), 'whatsapp', body);
+        for (const message of messages) {
+            const guest = await handleCreateGuest(
+                client,
+                message.from,
+                Boolean(message.referral),
+                now,
+            );
+
+            await upsertWaChat(client, message.from, guest.id, now);
+
+            try {
+                await insertWaMessage(client, {
+                    id: ulid(),
+                    wa_message_id: message.id,
+                    wa_chat_phone: message.from,
+                    text: message.text?.body ?? null,
+                    owner: 'guest',
+                    status: 'delivered',
+                    worker_status: 'need_processed',
+                    concurrency_version: 0,
+                    sent_at: now,
+                });
+            } catch (error) {
+                if ((error as { code?: string }).code !== UNIQUE_ERROR_CODE) {
+                    throw error;
+                }
+            }
+        }
+
+        // Обновить статусы сообщений
+        for (const update of statuses) {
+            const parsedStatus = waMessageStatusSchema.safeParse(update.status);
+            if (!parsedStatus.success) {
+                continue;
+            }
+            const current = await selectWaMessage(client, update.id);
+            if (!current) {
+                continue;
+            }
+            if (waMessageStatusRank[parsedStatus.data] <= waMessageStatusRank[current.status]) {
+                continue;
+            }
+            await updateWaMessageStatus(
+                client,
+                update.id,
+                parsedStatus.data,
+                current.concurrency_version,
+            );
+        }
+
         return status(200);
     } catch (error) {
         console.error(error);
         return status(500);
     } finally {
         client.release();
+    }
+};
+
+const handleCreateGuest = async (
+    client: PoolClient,
+    phone: string,
+    fromAd: boolean,
+    now: Date,
+): Promise<GuestStorage> => {
+    const existing = await selectGuestByPhone(client, phone);
+    if (existing) {
+        return existing;
+    }
+    const created: GuestStorage = {
+        id: ulid(),
+        wa_phone: phone,
+        first_name: null,
+        last_name: null,
+        instagram_url: null,
+        came_from: fromAd ? 'ad' : 'manual',
+        came_at: toDateTime(now),
+    };
+    try {
+        await insertGuest(client, created);
+        return created;
+    } catch (error) {
+        if ((error as { code?: string }).code === UNIQUE_ERROR_CODE) {
+            return handleCreateGuest(client, phone, fromAd, now);
+        }
+        throw error;
     }
 };
 

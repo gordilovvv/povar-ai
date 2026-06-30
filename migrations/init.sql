@@ -26,7 +26,7 @@ create table party_time (
 -- Guests (users)
 create table guests (
     id text primary key,
-    wa_phone text,
+    wa_phone text unique,
     first_name text,
     last_name text,
     instagram_url text,
@@ -60,14 +60,14 @@ create table wa_messages (
     text text,
     owner text not null, -- ai | guest | marketing | sema
     status text, -- idle | sent | delivered | read | failed
+    worker_status text, -- need_processed | processing | processed | failed
     concurrency_version integer not null default 0,
     sent_at timestamp with time zone
 );
 
--- Webhooks-queue
-create table webhook_tasks (
-    id text primary key,
-    platform text not null, -- whatsapp | instagram
-    data jsonb not null,
-    retry integer not null default 0
-);
+create index if not exists wa_messages_claim
+    on wa_messages (worker_status, wa_chat_phone, sent_at)
+    where worker_status in ('need_processed', 'processing');
+
+create index if not exists wa_messages_chat_history
+    on wa_messages (wa_chat_phone, id desc);
