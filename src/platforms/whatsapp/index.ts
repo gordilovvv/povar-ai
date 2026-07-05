@@ -31,8 +31,6 @@ export const sendWhatsappText = async (to: string, body: string): Promise<string
     }
 
     const parsed = sendResponseSchema.safeParse(await response.json());
-    console.log('[whatsapp-res]', parsed.data);
-
     const id = parsed.success ? parsed.data.messages[0]?.id : undefined;
     if (!id) {
         throw new Error('WhatsApp send: unexpected response shape');

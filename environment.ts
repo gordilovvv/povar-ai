@@ -5,9 +5,11 @@ export const environmentSchema = z.object({
     DATABASE_URL: z.string(),
     WA_TOKEN: z.string(),
     WA_SECRET: z.string(),
+    WA_APP_SECRET: z.string(),
     WA_PHONE_ID: z.string(),
     ANTHROPIC_API_KEY: z.string(),
     ANTHROPIC_MODEL: z.string(),
+    WA_SEND: z.enum(['on', 'off']),
 });
 
 export type Environment = z.infer<typeof environmentSchema>;

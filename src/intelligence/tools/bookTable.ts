@@ -4,7 +4,7 @@ import { updateGuestlistBooking } from '../../db/guestlist.ts';
 import type { AgentTool, ToolContext } from './types.ts';
 
 const name = 'book_table';
-const description = `Забронировать стол гостю на конкретной вечеринке. Вызывай только когда гость явно согласился взять стол. Гость уже должен быть в гест-листе (add_to_guestlist). table — необязательная метка/зона стола, если гость назвал.`;
+const description = `Book a table for the guest at a specific party. Call it only when the guest explicitly agreed to take a table. The guest must already be on the guestlist (add_to_guestlist). table is an optional table label/zone if the guest named one.`;
 
 const input = z.object({
     party_id: z.string().min(1),

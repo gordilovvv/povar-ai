@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Запросы к prod-БД через DATABASE_URL из .env.prod. ОСТОРОЖНО: боевая база.
-#   ./scripts/db-prod.sh "SELECT id FROM guests LIMIT 5"   # выполнить SQL
-#   ./scripts/db-prod.sh                                   # интерактивный psql
+# Запросы к БД через DATABASE_URL из .env.prod.
+#   ./scripts/db.sh "SELECT id FROM guests LIMIT 5"   # выполнить SQL
+#   ./scripts/db.sh                                   # интерактивный psql
 # Креды не печатаются (set +x). Вывод запроса идёт как есть — не селекти секреты.
 
 set -euo pipefail

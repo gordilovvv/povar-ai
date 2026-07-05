@@ -4,7 +4,7 @@ import { updateGuestProfile } from '../../db/guests.ts';
 import type { AgentTool, ToolContext } from './types.ts';
 
 const name = 'update_guest';
-const description = `Сохранить собранные данные гостя (имя/фамилия/инстаграм) по мере того как он их называет в чате. Вызывай каждый раз, когда узнал новое поле. Повторный вызов безопасен. Возвращает missing — какие поля ещё не собраны; продолжай спрашивать, пока не пусто.`;
+const description = `Save collected guest data (first/last name, instagram) as the guest shares it in chat. Call it every time you learn a new field. Repeated calls are safe. Returns missing — fields not collected yet; keep asking until it is empty.`;
 
 const input = z.object({
     first_name: z.string().min(1).optional(),

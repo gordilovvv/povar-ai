@@ -1,9 +1,14 @@
 services:
   api:
-    image: sema-ai:latest
-    build: .
+    image: sema-ai:${VERSION:-latest}
     restart: unless-stopped
     ports:
       - "127.0.0.1:${PORT}:${PORT}"
     env_file: .env
-    command: ["node", "src/index.ts"]
+    command: ["node", "src/webhook.ts"]
+
+  worker:
+    image: sema-ai:${VERSION:-latest}
+    restart: unless-stopped
+    env_file: .env
+    command: ["node", "src/worker.ts"]

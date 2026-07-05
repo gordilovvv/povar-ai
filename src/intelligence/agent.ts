@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import { env } from '../../environment.ts';
@@ -5,6 +7,7 @@ import type { PartyGuestlistStorage } from '../db/guestlist.ts';
 import type { GuestStorage } from '../db/guests.ts';
 import type { WaMessageStorage } from '../db/wa-messages.ts';
 import { toolsByName, tools as toolsList } from './tools/index.ts';
+import sendMessage from './tools/sendMessage.ts';
 import type { ToolContext } from './tools/types.ts';
 
 export interface ChatContext {
@@ -14,54 +17,20 @@ export interface ChatContext {
     now: string;
 }
 
-const MAX_STEPS = 12;
-const MAX_TOKENS = 1024;
+export class Agent {
+    static client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+    static system = readFileSync(join(import.meta.dirname, 'system.md'), 'utf8');
 
-const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+    static toolDefs: Anthropic.Tool[] = toolsList.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        input_schema: z.toJSONSchema(tool.input) as Anthropic.Tool.InputSchema,
+    }));
 
-const toolDefs: Anthropic.Tool[] = toolsList.map((tool) => ({
-    name: tool.name,
-    description: tool.description,
-    input_schema: z.toJSONSchema(tool.input) as Anthropic.Tool.InputSchema,
-}));
+    static MAX_STEPS = 12;
+    static MAX_TOKENS = 1024;
 
-// Статичная часть промпта — кэшируется (cache_control), переиспользуется между вызовами.
-const BEHAVIOR = `Ты — Сёма (sema), хост вечеринок в Дубае. Общаешься с гостями в WhatsApp как живой человек, не как бот.
-
-## Тон
-- На «бро/ты», тёпло, по-дружески, без давления. Пишешь СУХО и коротко, как живой парень в мессенджере.
-- Каждый пузырь — одна короткая мысль. Часто 1–4 слова («Так», «Внутри тусовка», «Surf Club»). Длинное дроби на пузыри.
-- Эмодзи РЕДКО: максимум один на весь ответ, и только ❤️/💙, обычно в тёплом закрытии. Никаких 🎉🔥👌😊👋 пачками.
-- Скобка-улыбка ) уместна. Не расписывай, не объясняй лишнего, не продавай — сухо и по делу, но тепло.
-- Все пузыри одного ответа отправляешь ОДНИМ вызовом send_message (массив texts), а не по одному.
-
-Примеры реального тона (так и пиши):
-гость: Привет → «Привет) как дела ?»
-гость: я в Дубае → «Так» / «В субботу я жду»
-гость: какая площадка? → «Surf Club» / «Четверг COYA» / «На пальме»
-гость: жарко на улице → «Внутри тусовка» / «Комфортно будет»
-гость: спасибо за приглашение ❤️ → «❤️❤️❤️» / «Тоже буду рад видеть»
-
-## Как отвечать
-- ЕДИНСТВЕННЫЙ способ написать гостю — вызвать send_message. Любой текст вне send_message гость не увидит.
-- Это WhatsApp: пиши простым текстом, без markdown (никаких **, *, ##, списков с #). Выделяй смысл словами и эмодзи, а не разметкой.
-- Не выдавай сразу всё. Сначала small talk: «как дела?», «ты в Дубае?». Потом переход к ивенту.
-
-## Флоу
-1. Приветствие + small talk (как дела / ты в Дубае).
-2. Данные о вечеринках бери через get_parties (площадки, даты/время, цена, ассеты). Анонсируй дату и площадку.
-3. Тихо собираешь данные гостя в чате: спрашиваешь имя/фамилию, потом инстаграм. Каждое поле сохраняешь через update_guest.
-4. Когда есть имя — заносишь в гест-лист через add_to_guestlist (party_id из get_parties).
-5. Можешь предложить стол. Если гость согласился — book_table. Если отказ/«подумаю» — не дави, закрывай позитивно.
-6. Можешь поделиться афишей и WhatsApp-группой (из get_parties → assets).
-
-## Важно
-- Формы (forms.gle) больше НЕТ. Ты сам собираешь имя и инсту в переписке — не шли ссылок на формы.
-- Не дави на продажу стола: приоритет — пригласить и занести в гест-лист.
-- Нерелевантное (рецепты, оффтоп) — мягко отшей с юмором, не продолжай.`;
-
-export const agent = {
-    async do(context: ChatContext): Promise<string[]> {
+    static async do(context: ChatContext): Promise<string[]> {
         const replies: string[] = [];
         const ctx: ToolContext = {
             guestId: context.guest.id,
@@ -69,23 +38,25 @@ export const agent = {
             replies,
         };
 
-        const messages = buildMessages(context.messages);
-        const system = buildSystem(context);
-
         const startedAt = process.hrtime();
+        const messages = Agent.buildMessages(context.messages);
+        const system = Agent.buildSystem(context);
+
         let inputTokens = 0;
         let outputTokens = 0;
         let cacheRead = 0;
         let cacheWrite = 0;
+        let retriedEmptyReply = false;
+
         let steps = 0;
 
-        for (let step = 0; step < MAX_STEPS; step++) {
+        for (let step = 0; step < Agent.MAX_STEPS; step++) {
             steps = step + 1;
-            const response = await client.messages.create({
+            const response = await Agent.client.messages.create({
                 model: env.ANTHROPIC_MODEL,
-                max_tokens: MAX_TOKENS,
+                max_tokens: Agent.MAX_TOKENS,
                 system,
-                tools: toolDefs,
+                tools: Agent.toolDefs,
                 messages,
             });
             messages.push({ role: 'assistant', content: response.content });
@@ -100,8 +71,9 @@ export const agent = {
             );
 
             if (response.stop_reason !== 'tool_use' || !toolUses.length) {
-                // fallback: модель ответила текстом мимо send_message — не теряем реплику
+                // модель ответила текстом мимо send_message, не теряем реплику — шлём сами
                 if (!replies.length) {
+                    const bubbles: string[] = [];
                     for (const block of response.content) {
                         if (block.type !== 'text') {
                             continue;
@@ -109,10 +81,22 @@ export const agent = {
                         for (const line of block.text.split('\n')) {
                             const bubble = line.trim();
                             if (bubble) {
-                                replies.push(bubble);
+                                bubbles.push(bubble);
                             }
                         }
                     }
+                    if (bubbles.length) {
+                        await sendMessage.handler(ctx, { texts: bubbles });
+                    }
+                }
+                // модель завершила ход, не написав гостю — один раз подталкиваем ответить
+                if (!replies.length && !retriedEmptyReply) {
+                    retriedEmptyReply = true;
+                    messages.push({
+                        role: 'user',
+                        content: '(You did not message the guest. Reply now via send_message.)',
+                    });
+                    continue;
                 }
                 break;
             }
@@ -147,75 +131,58 @@ export const agent = {
         );
 
         return replies;
-    },
-};
+    }
 
-const buildMessages = (history: WaMessageStorage[]): Anthropic.MessageParam[] => {
-    const messages: Anthropic.MessageParam[] = [];
-    for (const message of history) {
-        if (!message.text) {
-            continue;
+    static buildMessages(history: WaMessageStorage[]): Anthropic.MessageParam[] {
+        const messages: Anthropic.MessageParam[] = [];
+        for (const message of history) {
+            if (!message.text) {
+                continue;
+            }
+            messages.push({
+                role: message.owner === 'guest' ? 'user' : 'assistant',
+                content: message.text,
+            });
         }
-        messages.push({
-            role: message.owner === 'guest' ? 'user' : 'assistant',
-            content: message.text,
-        });
-    }
-    const last = messages[messages.length - 1];
-    if (last?.role !== 'user') {
-        messages.push({
-            role: 'user',
-            content: '(гость молчит — начни диалог тёплым приветствием)',
-        });
-    }
-    return messages;
-};
-
-const buildSystem = (context: ChatContext): Anthropic.TextBlockParam[] => {
-    const lang = detectGuestLang(context.messages);
-    const langLine =
-        lang === 'en'
-            ? 'Гость пишет ПО-АНГЛИЙСКИ — отвечай ТОЛЬКО на английском, ни слова по-русски.'
-            : 'Гость пишет ПО-РУССКИ — отвечай на русском.';
-
-    const known: string[] = [];
-    if (context.guest.first_name) known.push(`имя: ${context.guest.first_name}`);
-    if (context.guest.last_name) known.push(`фамилия: ${context.guest.last_name}`);
-    if (context.guest.instagram_url) known.push(`instagram: ${context.guest.instagram_url}`);
-    if (context.guest.came_from === 'ad') known.push('пришёл с рекламы');
-
-    const onLists: string[] = [];
-    for (const entry of context.ownedGuestlist) {
-        const booked = entry.booked_table ? ', стол забронирован' : '';
-        onLists.push(`- party_id=${entry.party_id}${booked}`);
-    }
-
-    const tail = `## Язык (критично)
-${langLine}
-
-## Что уже знаем о госте
-${known.length ? known.join('; ') : '(пока ничего — собери имя и инсту)'}
-
-## Гость уже в гест-листах
-${onLists.length ? onLists.join('\n') : '(ни в одном)'}
-
-Текущее время в Дубае: ${context.now}.`;
-
-    return [
-        { type: 'text', text: BEHAVIOR, cache_control: { type: 'ephemeral' } },
-        { type: 'text', text: tail },
-    ];
-};
-
-const detectGuestLang = (history: WaMessageStorage[]): 'ru' | 'en' => {
-    let cyrillic = 0;
-    let latin = 0;
-    for (const message of history) {
-        if (message.owner !== 'guest' || !message.text) {
-            continue;
+        const last = messages[messages.length - 1];
+        if (last?.role !== 'user') {
+            messages.push({
+                role: 'user',
+                content: '(the guest is silent — open the dialog with a warm greeting)',
+            });
         }
-        cyrillic += (message.text.match(/[а-яё]/gi) ?? []).length;
-        latin += (message.text.match(/[a-z]/gi) ?? []).length;
+        return messages;
     }
-    return latin > cyrillic ? 'en' : 'ru';
-};
+
+    static buildSystem = (context: ChatContext): Anthropic.TextBlockParam[] => {
+        const lang = context.guest.lang || 'en';
+        const langLine =
+            lang === 'en'
+                ? 'The guest writes in ENGLISH — reply ONLY in English, not a word of Russian.'
+                : 'The guest writes in RUSSIAN — reply in Russian.';
+
+        const known: string[] = [];
+        if (context.guest.first_name) known.push(`first name: ${context.guest.first_name}`);
+        if (context.guest.last_name) known.push(`last name: ${context.guest.last_name}`);
+        if (context.guest.instagram_url) known.push(`instagram: ${context.guest.instagram_url}`);
+        if (context.guest.came_from === 'ad') known.push('came from an ad');
+
+        const onLists: string[] = [];
+        for (const entry of context.ownedGuestlist) {
+            const booked = entry.booked_table ? ' (table booked)' : '';
+            onLists.push(`party ${entry.party_id}${booked}`);
+        }
+
+        const tail = [
+            `Language: ${langLine}`,
+            `Known about guest: ${known.length ? known.join('; ') : 'nothing yet — collect name and instagram'}`,
+            `On guestlists: ${onLists.length ? onLists.join('; ') : 'none'}`,
+            `Dubai time now: ${context.now}.`,
+        ].join('\n');
+
+        return [
+            { type: 'text', text: Agent.system, cache_control: { type: 'ephemeral' } },
+            { type: 'text', text: tail },
+        ];
+    };
+}

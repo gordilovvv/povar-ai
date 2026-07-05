@@ -133,6 +133,7 @@ const handleCreateGuest = async (
         instagram_url: null,
         came_from: fromAd ? 'ad' : 'manual',
         came_at: toDateTime(now),
+        lang: null,
     };
     try {
         await insertGuest(client, created);

@@ -1,6 +1,6 @@
 import { pool } from './db/db.ts';
 import { selectGuestlistByGuest } from './db/guestlist.ts';
-import { selectGuestByPhone } from './db/guests.ts';
+import { selectGuestByPhone, updateGuestLang } from './db/guests.ts';
 import {
     selectWaChatMessages,
     updateProcessingToFailed,
@@ -8,8 +8,9 @@ import {
     updateWaMessagesWorkerStatus,
     type WaMessageStorage,
 } from './db/wa-messages.ts';
-import { agent, type ChatContext } from './intelligence/agent.ts';
+import { Agent, type ChatContext } from './intelligence/agent.ts';
 import { toDateTime } from './lib/fmt.ts';
+import { parseLanguage } from './lib/lang.ts';
 import { sleep } from './lib/sleep.ts';
 import { getDubaiTime } from './lib/time.ts';
 
@@ -61,7 +62,7 @@ const handleChat = async (phone: string, messageIds: string[]) => {
             `[worker] chat ${phone} context collected in ${seconds}s ${Math.round(nanos / 1e6)}ms`,
         );
 
-        await agent.do(context);
+        await Agent.do(context);
     } catch (error) {
         console.error(`[worker] chat ${phone} failed`, error);
         workerStatus = 'failed';
@@ -80,6 +81,22 @@ const buildChatContext = async (phone: string): Promise<ChatContext> => {
         const messages = (
             await selectWaChatMessages(client, phone, null, MESSAGES_HISTORY_LIMIT)
         ).reverse(); // последние N, разворот в хронологию
+
+        // Язык пользователья
+        if (!guest.lang) {
+            const guestTexts: string[] = [];
+            for (const message of messages) {
+                if (message.owner === 'guest' && message.text) {
+                    guestTexts.push(message.text);
+                }
+            }
+            const lang = parseLanguage(guestTexts);
+            if (lang) {
+                await updateGuestLang(client, guest.id, lang);
+                guest.lang = lang;
+            }
+        }
+
         const ownedGuestlist = await selectGuestlistByGuest(client, guest.id);
         const now = getDubaiTime().format('YYYY-MM-DD HH:mm:ss');
         return { guest, messages, ownedGuestlist, now };

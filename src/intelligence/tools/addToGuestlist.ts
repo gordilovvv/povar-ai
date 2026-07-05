@@ -5,7 +5,7 @@ import { toDateTime } from '../../lib/fmt.ts';
 import type { AgentTool, ToolContext } from './types.ts';
 
 const name = 'add_to_guestlist';
-const description = `Тихо занести гостя в гест-лист конкретной вечеринки. Вызывай после того как собрал имя гостя. Идемпотентно — повторный вызов безопасен. party_id бери из списка активных вечеринок.`;
+const description = `Put the guest on the guestlist of a specific party. Call it once you have the guest's first name. Idempotent — a repeated call is safe. Take party_id from the active parties list.`;
 
 const input = z.object({
     party_id: z.string().min(1),

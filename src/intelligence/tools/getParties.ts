@@ -5,12 +5,11 @@ import { formatDubai } from '../../lib/time.ts';
 import type { AgentTool } from './types.ts';
 
 const name = 'get_parties';
-const description = `Получить активные вечеринки (площадки, даты/время в Дубае, цена входа) и ассеты для шеринга (WhatsApp-группа, афиша). Вызывай когда нужно рассказать гостю про вечеринки или взять party_id.`;
+const description = `Get active parties (venues, Dubai dates/times, entry price) and assets (instagram link). Call it when you need to tell the guest about parties, take a party_id, or send the instagram link.`;
 
 const input = z.object({});
 
-const WHATSAPP_GROUP = 'https://chat.whatsapp.com/GZ2IIBdkm4W78CoqNtxayu';
-const FLYER_REEL = 'https://www.instagram.com/reel/DZka5l_zn7c/';
+const INSTAGRAM = 'https://www.instagram.com/weare.wrld/';
 
 const handler = async () => {
     const client = await pool.connect();
@@ -39,7 +38,7 @@ const handler = async () => {
         }
         return {
             parties: result,
-            assets: { whatsapp_group: WHATSAPP_GROUP, flyer_reel: FLYER_REEL },
+            assets: { instagram: INSTAGRAM },
         };
     } finally {
         client.release();

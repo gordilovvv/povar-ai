@@ -31,7 +31,8 @@ create table guests (
     last_name text,
     instagram_url text,
     came_from text, -- ad | manual
-    came_at timestamp with time zone
+    came_at timestamp with time zone,
+    lang text
 );
 
 create table party_guestlist (
