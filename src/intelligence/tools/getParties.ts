@@ -5,7 +5,7 @@ import { formatDubai } from '../../lib/time.ts';
 import type { AgentTool } from './types.ts';
 
 const name = 'get_parties';
-const description = `Get active parties (venues, Dubai dates/times, entry price) and assets (instagram link). Call it when you need to tell the guest about parties, take a party_id, or send the instagram link.`;
+const description = `Get active parties (venues, Dubai dates/times, entry price, reels_url = the party poster) and assets (instagram link). Call it when you need to tell the guest about parties, take a party_id, send the instagram link, or send the poster (reels_url).`;
 
 const input = z.object({});
 
@@ -32,6 +32,8 @@ const handler = async () => {
                 name: party.name,
                 location: party.location,
                 price: party.price,
+                notes: party.notes,
+                reels_url: party.reels_url,
                 google_map_link: party.google_map_link,
                 when,
             });

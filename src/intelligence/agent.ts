@@ -8,6 +8,7 @@ import type { GuestStorage } from '../db/guests.ts';
 import type { WaMessageStorage } from '../db/wa-messages.ts';
 import { toolsByName, tools as toolsList } from './tools/index.ts';
 import sendMessage from './tools/sendMessage.ts';
+import { IMAGE_PLACEHOLDER } from './tools/showTables.ts';
 import type { ToolContext } from './tools/types.ts';
 
 export interface ChatContext {
@@ -71,8 +72,10 @@ export class Agent {
             );
 
             if (response.stop_reason !== 'tool_use' || !toolUses.length) {
+                // картинка без текста ответом не считается
+                const hasTextReply = replies.some((text) => text !== IMAGE_PLACEHOLDER);
                 // модель ответила текстом мимо send_message, не теряем реплику — шлём сами
-                if (!replies.length) {
+                if (!hasTextReply) {
                     const bubbles: string[] = [];
                     for (const block of response.content) {
                         if (block.type !== 'text') {
@@ -90,7 +93,7 @@ export class Agent {
                     }
                 }
                 // модель завершила ход, не написав гостю — один раз подталкиваем ответить
-                if (!replies.length && !retriedEmptyReply) {
+                if (!replies.some((text) => text !== IMAGE_PLACEHOLDER) && !retriedEmptyReply) {
                     retriedEmptyReply = true;
                     messages.push({
                         role: 'user',
@@ -177,6 +180,7 @@ export class Agent {
             `Language: ${langLine}`,
             `Known about guest: ${known.length ? known.join('; ') : 'nothing yet — collect name and instagram'}`,
             `On guestlists: ${onLists.length ? onLists.join('; ') : 'none'}`,
+            Agent.buildFlowState(context),
             `Dubai time now: ${context.now}.`,
         ].join('\n');
 
@@ -184,5 +188,89 @@ export class Agent {
             { type: 'text', text: Agent.system, cache_control: { type: 'ephemeral' } },
             { type: 'text', text: tail },
         ];
+    };
+
+    static buildFlowState = (context: ChatContext): string => {
+        const semaTexts: string[] = [];
+        const guestTexts: string[] = [];
+        for (const message of context.messages) {
+            if (!message.text) {
+                continue;
+            }
+            if (message.owner === 'sema') {
+                semaTexts.push(message.text);
+            }
+            if (message.owner === 'guest') {
+                guestTexts.push(message.text);
+            }
+        }
+
+        const nameDone = !!context.guest.first_name;
+        const guestlistDone = context.ownedGuestlist.length > 0;
+        const instaDone = !!context.guest.instagram_url;
+        // вопрос про инсту гостя, но не follow-up с нашей ссылкой/подпиской
+        const instaAsked = semaTexts.some(
+            (t) => /инст|insta/i.test(t) && !/подпи|follow|instagram\.com/i.test(t),
+        );
+        const followupDone = semaTexts.some((t) => t.includes('instagram.com'));
+        const tableBooked = context.ownedGuestlist.some((entry) => entry.booked_table);
+        const tableAsked = guestTexts.some((t) => /стол|table/i.test(t));
+        // стол считаем обсуждаемым по репликам гостя — свой безответный оффер не в счёт
+        const tableTalk = tableBooked || tableAsked;
+
+        const lines: string[] = [];
+        if (tableBooked) {
+            lines.push('[✓] table — booked');
+        } else if (tableAsked) {
+            lines.push(
+                '[→] TABLE — the guest is asking about a table: acknowledge it in your VERY NEXT reply and drive to the booking. Name → guestlist are prerequisites for book_table — weave them into the table flow, never answer with the guestlist pitch alone. Instagram is NOT a prerequisite — never gate the booking on it. Once the guest agrees and the party + size are known from the chat — call book_table immediately, no extra clarifying questions.',
+            );
+        }
+        lines.push(
+            nameDone
+                ? '[✓] name — collected'
+                : '[→] collect first+last name ("пришли имя фамилию")',
+        );
+        if (guestlistDone) {
+            lines.push('[✓] guestlist — added');
+        } else if (nameDone) {
+            lines.push(
+                '[→] add to guestlist silently + confirm with entry conditions; if the party is unclear, fork: ask which party — nothing else',
+            );
+        } else {
+            lines.push('[ ] guestlist — after the name');
+        }
+        if (instaDone) {
+            lines.push('[✓] instagram — collected');
+        } else if (instaAsked) {
+            lines.push(
+                '[…] instagram — ALREADY ASKED, awaiting answer. Do NOT repeat the question now. If the guest ignored it, move on; you may weave ONE soft re-ask into a later reply when the guest is engaged again.',
+            );
+        } else if (guestlistDone) {
+            lines.push(
+                "[→] ask for the guest's instagram; if the guest just asked a question, answer it AND ask in the SAME reply",
+            );
+        } else {
+            lines.push('[ ] instagram — later');
+        }
+        if (tableTalk) {
+            lines.push(
+                '[✗] instagram follow-up — SKIP: a table is discussed/booked. Do NOT send the insta link.',
+            );
+        } else if (followupDone) {
+            lines.push('[✓] instagram follow-up — sent');
+        } else if (guestlistDone) {
+            lines.push(
+                '[→] after the guestlist confirm: send the instagram follow-up with the link, unprompted',
+            );
+        } else {
+            lines.push('[ ] instagram follow-up — later');
+        }
+
+        const anyCurrent = lines.some((line) => line.startsWith('[→]'));
+        const footer = anyCurrent
+            ? 'Do the [→] steps (after handling what the guest just said). [✗] and […] are hard constraints — never violate them.'
+            : 'Nothing pending. Fork: EITHER offer a table once (if not offered yet) OR just close warm.';
+        return `Flow state (computed from the real saved state and chat — trust it over your own reading):\n${lines.join('\n')}\n${footer}`;
     };
 }

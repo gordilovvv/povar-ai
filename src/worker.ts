@@ -13,7 +13,7 @@ import { Agent, type ChatContext } from './intelligence/agent.ts';
 import { toDateTime } from './lib/fmt.ts';
 import { parseLanguage } from './lib/lang.ts';
 import { sleep } from './lib/sleep.ts';
-import { getDubaiTime } from './lib/time.ts';
+import { formatDubaiNow } from './lib/time.ts';
 import { sendTypingIndicator } from './platforms/whatsapp/index.ts';
 
 const CHATS_LIMIT = 3;
@@ -105,7 +105,7 @@ const buildChatContext = async (phone: string): Promise<ChatContext> => {
         }
 
         const ownedGuestlist = await selectGuestlistByGuest(client, guest.id);
-        const now = getDubaiTime().format('YYYY-MM-DD HH:mm:ss');
+        const now = formatDubaiNow();
         return { guest, messages, ownedGuestlist, now };
     } finally {
         client.release();

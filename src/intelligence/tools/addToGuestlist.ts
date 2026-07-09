@@ -1,11 +1,12 @@
 import { z } from 'zod';
 import { pool, UNIQUE_ERROR_CODE } from '../../db/db.ts';
 import { insertGuestlistEntry, selectGuestlistEntry } from '../../db/guestlist.ts';
+import { selectGuestByPhone } from '../../db/guests.ts';
 import { toDateTime } from '../../lib/fmt.ts';
 import type { AgentTool, ToolContext } from './types.ts';
 
 const name = 'add_to_guestlist';
-const description = `Put the guest on the guestlist of a specific party. Call it once you have the guest's first name. Idempotent — a repeated call is safe. Take party_id from the active parties list.`;
+const description = `Put the guest on the guestlist of a specific party. Call it once you have the guest's first name AND instagram. Requires the guest's own instagram saved first — returns instagram_required if missing, collect it via update_guest then retry. Idempotent — a repeated call is safe. Take party_id from the active parties list.`;
 
 const input = z.object({
     party_id: z.string().min(1),
@@ -19,6 +20,11 @@ const handler = async (ctx: ToolContext, raw: unknown): Promise<unknown> => {
 
     const client = await pool.connect();
     try {
+        const guest = await selectGuestByPhone(client, ctx.phone);
+        if (!guest?.instagram_url) {
+            return { ok: false, error: 'instagram_required' };
+        }
+
         const existing = await selectGuestlistEntry(client, parsed.data.party_id, ctx.guestId);
         if (existing) {
             return { ok: true, already: true };
