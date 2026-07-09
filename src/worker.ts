@@ -15,7 +15,7 @@ import { sleep } from './lib/sleep.ts';
 import { getDubaiTime } from './lib/time.ts';
 
 const CHATS_LIMIT = 3;
-const MESSAGES_HISTORY_LIMIT = 15;
+const MESSAGES_HISTORY_LIMIT = 40;
 const POLL_INTERVAL_MS = 1_000;
 const BEFORE_REPLY_WINDOW_MS = 5_000;
 
