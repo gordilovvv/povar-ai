@@ -1,3 +1,4 @@
+import { env } from '../environment.ts';
 import { pool } from './db/db.ts';
 import { selectGuestlistByGuest } from './db/guestlist.ts';
 import { selectGuestByPhone, updateGuestLang } from './db/guests.ts';
@@ -13,6 +14,7 @@ import { toDateTime } from './lib/fmt.ts';
 import { parseLanguage } from './lib/lang.ts';
 import { sleep } from './lib/sleep.ts';
 import { getDubaiTime } from './lib/time.ts';
+import { sendTypingIndicator } from './platforms/whatsapp/index.ts';
 
 const CHATS_LIMIT = 3;
 const MESSAGES_HISTORY_LIMIT = 40;
@@ -56,6 +58,11 @@ const handleChat = async (phone: string, messageIds: string[]) => {
     try {
         const startedAt = process.hrtime();
         const context = await buildChatContext(phone);
+
+        if (env.WA_SEND === 'on') {
+            const waId = context.messages.findLast((m) => m.owner === 'guest')?.wa_message_id;
+            if (waId) void sendTypingIndicator(waId).catch(() => {});
+        }
 
         const [seconds, nanos] = process.hrtime(startedAt);
         console.log(
