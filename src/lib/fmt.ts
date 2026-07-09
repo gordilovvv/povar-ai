@@ -19,3 +19,6 @@ export function fromDateTime(date: string) {
 const LONG_DASHES = /[‒–—―⸺⸻]/g;
 
 export const stripLongDashes = (text: string) => text.replace(LONG_DASHES, '-');
+
+// Модель путает ё/е — убираем ё из исходящего текста вовсе.
+export const stripYo = (text: string) => text.replace(/ё/g, 'е').replace(/Ё/g, 'Е');

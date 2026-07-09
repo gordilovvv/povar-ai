@@ -4,7 +4,7 @@ import { env } from '../../../environment.ts';
 import { pool } from '../../db/db.ts';
 import { updateWaChatLastSent } from '../../db/wa-chats.ts';
 import { insertWaMessage } from '../../db/wa-messages.ts';
-import { stripLongDashes } from '../../lib/fmt.ts';
+import { stripLongDashes, stripYo } from '../../lib/fmt.ts';
 import { sendWhatsappText } from '../../platforms/whatsapp/index.ts';
 import type { AgentTool, ToolContext } from './types.ts';
 
@@ -21,7 +21,7 @@ const handler = async (ctx: ToolContext, raw: unknown) => {
         return { ok: false, error: 'bad_input' };
     }
 
-    const texts = parsed.data.texts.map(stripLongDashes);
+    const texts = parsed.data.texts.map((text) => stripYo(stripLongDashes(text)));
     const sent: { waMessageId: string; text: string }[] = [];
 
     if (env.WA_SEND === 'on') {
