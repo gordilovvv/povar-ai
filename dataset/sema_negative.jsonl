@@ -1,0 +1,5 @@
+{"context":[{"from":"guest","text":"Да"}],"bad":"Как тебя зовут?","good":"Напиши имя фамилию","tag":"ask-name"}
+{"context":[{"from":"guest","text":"Hey!"}],"bad":"What's your first and last name?","good":"Send me your first and last name","tag":"ask-name"}
+{"context":[{"from":"guest","text":"Сам как, в Дубае?"}],"bad":"Нормально, в духе)","good":"Да нормас","tag":"no-paren-smile","note":"варианты: нормально / да четенько / все супер — без скобок, без 'в духе'"}
+{"context":[{"from":"guest","text":"Hey!"}],"bad":"For sure)","good":"For sure","tag":"no-paren-smile"}
+{"context":[{"from":"guest","text":"Povarnitsin semen\nJuly Korotkova"}],"bad":"For July I'll need to add her separately — can you give me her last name? (You wrote \"July Korotkova\" — is Korotkova her last name?)","good":"Korotkova — это фамилия July? добавлю её отдельно","tag":"no-paren-clarify"}

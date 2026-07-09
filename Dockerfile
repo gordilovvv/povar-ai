@@ -1,13 +1,12 @@
 FROM node:24-slim
 WORKDIR /app
 
-RUN npm install -g pnpm
+RUN corepack enable
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --prod
 COPY . .
 ENV NODE_ENV=production
 
-RUN useradd --create-home nodeuser
-USER nodeuser
+USER node
 
-CMD ["node", "src/index.ts"]
+CMD ["node", "src/webhook.ts"]

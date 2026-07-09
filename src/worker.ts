@@ -1,7 +1,7 @@
+import { env } from '../environment.ts';
 import { pool } from './db/db.ts';
 import { selectGuestlistByGuest } from './db/guestlist.ts';
-import { selectGuestByPhone } from './db/guests.ts';
-import { selectActiveParties } from './db/party.ts';
+import { selectGuestByPhone, updateGuestLang } from './db/guests.ts';
 import {
     selectWaChatMessages,
     updateProcessingToFailed,
@@ -9,13 +9,15 @@ import {
     updateWaMessagesWorkerStatus,
     type WaMessageStorage,
 } from './db/wa-messages.ts';
-import { agent, type ChatContext } from './intelligence/agent.ts';
+import { Agent, type ChatContext } from './intelligence/agent.ts';
 import { toDateTime } from './lib/fmt.ts';
+import { parseLanguage } from './lib/lang.ts';
 import { sleep } from './lib/sleep.ts';
-import { getDubaiTime } from './lib/time.ts';
+import { formatDubaiNow } from './lib/time.ts';
+import { sendTypingIndicator } from './platforms/whatsapp/index.ts';
 
 const CHATS_LIMIT = 3;
-const MESSAGES_HISTORY_LIMIT = 15;
+const MESSAGES_HISTORY_LIMIT = 40;
 const POLL_INTERVAL_MS = 1_000;
 const BEFORE_REPLY_WINDOW_MS = 5_000;
 
@@ -57,12 +59,17 @@ const handleChat = async (phone: string, messageIds: string[]) => {
         const startedAt = process.hrtime();
         const context = await buildChatContext(phone);
 
+        if (env.WA_SEND === 'on') {
+            const waId = context.messages.findLast((m) => m.owner === 'guest')?.wa_message_id;
+            if (waId) void sendTypingIndicator(waId).catch(() => {});
+        }
+
         const [seconds, nanos] = process.hrtime(startedAt);
         console.log(
             `[worker] chat ${phone} context collected in ${seconds}s ${Math.round(nanos / 1e6)}ms`,
         );
 
-        await agent.do(context);
+        await Agent.do(context);
     } catch (error) {
         console.error(`[worker] chat ${phone} failed`, error);
         workerStatus = 'failed';
@@ -78,13 +85,28 @@ const buildChatContext = async (phone: string): Promise<ChatContext> => {
         if (!guest) {
             throw new Error(`Unknown guest ${phone}`);
         }
-        const parties = await selectActiveParties(client);
         const messages = (
             await selectWaChatMessages(client, phone, null, MESSAGES_HISTORY_LIMIT)
         ).reverse(); // последние N, разворот в хронологию
+
+        // Язык пользователья
+        if (!guest.lang) {
+            const guestTexts: string[] = [];
+            for (const message of messages) {
+                if (message.owner === 'guest' && message.text) {
+                    guestTexts.push(message.text);
+                }
+            }
+            const lang = parseLanguage(guestTexts);
+            if (lang) {
+                await updateGuestLang(client, guest.id, lang);
+                guest.lang = lang;
+            }
+        }
+
         const ownedGuestlist = await selectGuestlistByGuest(client, guest.id);
-        const now = getDubaiTime().format('YYYY-MM-DD HH:mm:ss');
-        return { guest, parties, messages, ownedGuestlist, now };
+        const now = formatDubaiNow();
+        return { guest, messages, ownedGuestlist, now };
     } finally {
         client.release();
     }

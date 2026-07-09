@@ -43,6 +43,9 @@
         "useImportType": "error",
         "useNodejsImportProtocol": "error"
       },
+      "complexity": {
+        "noStaticOnlyClass": "off"
+      },
       "correctness": {
         "noUnusedImports": "warn",
         "noUnusedVariables": "warn"

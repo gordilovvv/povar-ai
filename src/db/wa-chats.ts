@@ -31,3 +31,19 @@ export const upsertWaChat = async (
         ),
     );
 };
+
+export const updateWaChatLastSent = async (
+    client: PoolClient,
+    waPhone: string,
+    lastSentMessageAt: Date,
+) => {
+    await client.query(
+        format(
+            `update wa_chats
+                set last_sent_message_at = greatest(last_sent_message_at, %L)
+            where wa_phone = %L`,
+            toDateTime(lastSentMessageAt),
+            waPhone,
+        ),
+    );
+};

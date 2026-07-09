@@ -1,6 +1,6 @@
 {
   "name": "sema-ai",
-  "version": "0.0.1",
+  "version": "0.0.5",
   "type": "module",
   "private": true,
   "scripts": {
@@ -12,9 +12,11 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "pgweb": "pgweb --url $(grep DATABASE_URL .env.dev | cut -d= -f2-) --listen 8082"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.107.0",
     "@whatwg-node/server": "^0.11.0",
     "dayjs": "^1.11.21",
     "itty-router": "^5.0.18",

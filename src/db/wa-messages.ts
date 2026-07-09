@@ -127,7 +127,7 @@ export const updateWaMessagesWorkerStatus = async (
     workerStatus: WaWorkerStatus,
 ) => {
     await client.query(
-        format('update wa_messages set worker_status = %L where id = any(%L)', workerStatus, ids),
+        format('update wa_messages set worker_status = %L where id in (%L)', workerStatus, ids),
     );
 };
 
