@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { formatDubai } from '#Lib/Time.js';
-import { PARTIES, runDialog } from './nextstep/harness.ts';
+import { PARTIES, runDialog } from '../nextstep/harness.ts';
 
 const RU_STEM: Record<string, string> = {
     Sunday: 'воскрес',

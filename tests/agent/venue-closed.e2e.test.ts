@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { PARTIES, runDialog } from './nextstep/harness.ts';
+import { PARTIES, runDialog } from '../nextstep/harness.ts';
 
 const ONE_PARTY = { parties: PARTIES.slice(1) };
 

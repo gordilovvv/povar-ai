@@ -51,7 +51,7 @@ const handle = async (key: string): Promise<Thing> => {
   - `safeParseDigits(q)` — цифровой id/курсор: строка цифр или `null`. Bigint-id держим строкой, не `number` (precision).
   - `safeParseInt(q, default)` — целое, на невалиде `default`.
   - `safeParseString(q)` — строка санитизированная или `null`.
-  - `limit`: `Math.min(Math.max(x, 1), <max>)`.
+  - `limit`: `minMax(x, 1, <max>)` из `#Lib/Fmt.js` — clamp не инлайним `Math.min(Math.max(...))`; min/max-числа передаём тут же в `minMax`.
 - Тело (POST/PUT) — Zod `safeParse` + ранний `return` ошибкой (Zod — для body, `safeParse*` — для query/params).
 
 ## БД и соединение

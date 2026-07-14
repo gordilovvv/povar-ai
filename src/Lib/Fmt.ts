@@ -20,6 +20,11 @@ export const fromDateTime = (value: Date | string | null | undefined): string | 
     return parsed.isValid() ? parsed.toISOString() : null;
 };
 
+export const parseIsoUtc = (value: string): string | null => {
+    const parsed = dayjs.utc(value);
+    return parsed.isValid() && parsed.toISOString() === value ? value : null;
+};
+
 // Длинные тире (—, –, ―, …) выглядят «ботом» — заменяем на обычный дефис.
 const LONG_DASHES = /[‒–—―⸺⸻]/g;
 
@@ -55,4 +60,8 @@ export const safeParseInt = (value: string | string[] | undefined, fallback: num
 export const safeParseDigits = (value: string | string[] | undefined): string | null => {
     const str = safeParseString(value);
     return str !== null && /^\d+$/.test(str) ? str : null;
+};
+
+export const minMax = (value: number, min: number, max: number): number => {
+    return Math.min(Math.max(value, min), max);
 };

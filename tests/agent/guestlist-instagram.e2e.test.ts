@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { PARTIES, runDialog } from './nextstep/harness.ts';
+import { PARTIES, runDialog } from '../nextstep/harness.ts';
 
 // одна активная вечеринка — убираем ветку выбора party, изолируем гейт по инсте
 const ONE_PARTY = { parties: PARTIES.slice(1) };
