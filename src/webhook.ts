@@ -3,20 +3,20 @@ import { createServerAdapter } from '@whatwg-node/server';
 import { IttyRouter, type RequestHandler, status, text } from 'itty-router';
 import type { PoolClient } from 'pg';
 import { ulid } from 'ulid';
-import { env } from '../environment.ts';
-import { pool, UNIQUE_ERROR_CODE } from './db/db.ts';
-import { type GuestStorage, insertGuest, selectGuestByPhone } from './db/guests.ts';
-import { upsertWaChat } from './db/wa-chats.ts';
+import { type GuestStorage, insertGuest, selectGuestByPhone } from '#Db/Guests.js';
+import { pool, UNIQUE_ERROR_CODE } from '#Db/Pool.js';
+import { upsertWaChat } from '#Db/WaChats.js';
 import {
     insertWaMessage,
     selectWaMessage,
     updateWaMessageStatus,
     waMessageStatusRank,
     waMessageStatusSchema,
-} from './db/wa-messages.ts';
-import { toDateTime } from './lib/fmt.ts';
-import { payloadSchema } from './platforms/whatsapp/parse.ts';
-import { verifySignature } from './platforms/whatsapp/signature.ts';
+} from '#Db/WaMessages.js';
+import { env } from '#environment.js';
+import { toDateTime } from '#Lib/Fmt.js';
+import { payloadSchema } from '#Platforms/Whatsapp/Parse.js';
+import { verifySignature } from '#Platforms/Whatsapp/Signature.js';
 
 const handleVerifyWebhook: RequestHandler = (request) => {
     const query = request.query;

@@ -5,12 +5,10 @@
     "moduleResolution": "nodenext",
     "lib": ["esnext"],
     "types": ["node"],
-    "allowImportingTsExtensions": true,
+    "customConditions": ["development"],
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
     "moduleDetection": "force",
-    "erasableSyntaxOnly": true,
-    "noEmit": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
@@ -20,8 +18,10 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "noErrorTruncation": true,
-    "incremental": true
+    "removeComments": true,
+    "rootDir": "./src",
+    "outDir": "./dist"
   },
-  "include": ["src", "tests", "scripts", "migrations", "*.ts"],
-  "exclude": ["node_modules", "dist", ".esbuild", "coverage", "telegram-ai"]
+  "include": ["src"],
+  "exclude": ["node_modules", "dist", "coverage"]
 }

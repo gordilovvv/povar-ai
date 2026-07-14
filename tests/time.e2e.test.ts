@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { formatDubai, formatDubaiNow } from '../src/lib/time.ts';
+import { formatDubai, formatDubaiNow } from '#Lib/Time.js';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 

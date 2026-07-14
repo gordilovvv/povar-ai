@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Agent } from '../../src/intelligence/agent.ts';
+import { Agent } from '#Intelligence/Agent.js';
 import { type DialogResult, runDialog } from '../nextstep/harness.ts';
 import { type Scenario, scenarios } from '../nextstep/scenarios.ts';
 import { variants } from './variants.ts';

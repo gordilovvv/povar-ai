@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { pool } from '../../db/db.ts';
-import { selectActiveParties, selectActivePartyTimes } from '../../db/party.ts';
-import { formatDubai } from '../../lib/time.ts';
-import type { AgentTool } from './types.ts';
+import { selectActiveParties, selectActivePartyTimes } from '#Db/Party.js';
+import { pool } from '#Db/Pool.js';
+import type { AgentTool } from '#Intelligence/Tools/Types.js';
+import { formatDubai } from '#Lib/Time.js';
 
 const name = 'get_parties';
 const description = `Get active parties (venues, Dubai dates/times, entry price, reels_url = the party poster) and assets (instagram link). Call it when you need to tell the guest about parties, take a party_id, send the instagram link, or send the poster (reels_url).`;

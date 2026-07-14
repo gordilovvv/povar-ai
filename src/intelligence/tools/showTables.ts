@@ -1,13 +1,13 @@
 import { ulid } from 'ulid';
 import { z } from 'zod';
-import { env } from '../../../environment.ts';
-import { pool } from '../../db/db.ts';
-import { selectGuestlist } from '../../db/guestlist.ts';
-import { selectPartyTables } from '../../db/party.ts';
-import { updateWaChatLastSent } from '../../db/wa-chats.ts';
-import { insertWaMessage } from '../../db/wa-messages.ts';
-import { sendWhatsappImage } from '../../platforms/whatsapp/index.ts';
-import type { AgentTool, ToolContext } from './types.ts';
+import { selectGuestlist } from '#Db/Guestlist.js';
+import { selectPartyTables } from '#Db/Party.js';
+import { pool } from '#Db/Pool.js';
+import { updateWaChatLastSent } from '#Db/WaChats.js';
+import { insertWaMessage } from '#Db/WaMessages.js';
+import { env } from '#environment.js';
+import type { AgentTool, ToolContext } from '#Intelligence/Tools/Types.js';
+import { sendWhatsappImage } from '#Platforms/Whatsapp/index.js';
 
 const name = 'show_tables';
 const description = `Send the guest the table map image for a party and get zone prices plus occupied_tables — table numbers already taken. The image is sent to the guest automatically on every call — do NOT send any link yourself, and don't call this more than once per reply (each call re-sends the image). After calling, follow up with send_message inviting the guest to pick a table from the photo and tell you the number — do NOT recite the whole list of tables or prices. Answer a specific table's price/availability only when the guest names one, from prices/occupied_tables. Call when the guest asks about tables, table prices, zones, or whether a table is free.`;

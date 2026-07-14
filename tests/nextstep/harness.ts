@@ -1,6 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import type { WaMessageStorage } from '../../src/db/wa-messages.ts';
-import { Agent, type ChatContext } from '../../src/intelligence/agent.ts';
+import type { WaMessageStorage } from '#Db/WaMessages.js';
+import { Agent, type ChatContext } from '#Intelligence/Agent.js';
 
 export interface SimGuest {
     first_name: string | null;
@@ -52,7 +52,7 @@ export const PARTIES: SimParty[] = [
         price: 150,
         google_map_link: 'https://maps.app.goo.gl/9UDyD7XRjTfQSzYy7',
         reels_url: 'https://www.instagram.com/p/DUBJSn8DZW5/',
-        notes: 'LYLO — иммерсивный speakeasy-бар со скрытым танцполом на Palm Jumeirah (Canary Beach, Club Vista Mare). Вайб интимный, красный ретро-свет, deep house / minimal techno. Внутри прохладно, кондиционеры, комфортно. Бар: авторские коктейли (85–110 AED), премиум-крепкий, шампанское и вино (бокал 65–85 AED), интерактив «Discover Your Aura» — коктейль под настроение. При заведении есть ресторан (за стеной), но кухня работает примерно до 23:00 — поесть лучше до тусовки; на самой вечеринке уже только напитки. Кальяна нет.',
+        notes: 'LYLO — скрытый клуб-speakeasy ВНУТРИ ресторана на Canary Beach (Club Vista Mare, Palm Jumeirah). Это не открытая площадка и не терраса — закрытое помещение. Внутри: бар-зона с диванчиками и танцпол. Вайб интимный, красный ретро-свет, deep house / minimal techno. Прохладно, кондиционеры, комфортно. Бар: авторские коктейли (85–110 AED), премиум-крепкий, шампанское и вино (бокал 65–85 AED), интерактив «Discover Your Aura» — коктейль под настроение. Кухня ресторана работает примерно до 23:00 — поесть лучше до тусовки; на самой вечеринке только напитки. Кальяна нет.',
         when: [{ start: 'Saturday 20.06 22:00', free_entry_before: 'Sunday 21.06 00:00' }],
     },
 ];

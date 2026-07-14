@@ -1,20 +1,20 @@
-import { env } from '../environment.ts';
-import { pool } from './db/db.ts';
-import { selectGuestlistByGuest } from './db/guestlist.ts';
-import { selectGuestByPhone, updateGuestLang } from './db/guests.ts';
+import { selectGuestlistByGuest } from '#Db/Guestlist.js';
+import { selectGuestByPhone, updateGuestLang } from '#Db/Guests.js';
+import { pool } from '#Db/Pool.js';
 import {
     selectWaChatMessages,
     updateProcessingToFailed,
     updateWaMessagesToProcessing,
     updateWaMessagesWorkerStatus,
     type WaMessageStorage,
-} from './db/wa-messages.ts';
-import { Agent, type ChatContext } from './intelligence/agent.ts';
-import { toDateTime } from './lib/fmt.ts';
-import { parseLanguage } from './lib/lang.ts';
-import { sleep } from './lib/sleep.ts';
-import { formatDubaiNow } from './lib/time.ts';
-import { sendTypingIndicator } from './platforms/whatsapp/index.ts';
+} from '#Db/WaMessages.js';
+import { env } from '#environment.js';
+import { Agent, type ChatContext } from '#Intelligence/Agent.js';
+import { toDateTime } from '#Lib/Fmt.js';
+import { parseLanguage } from '#Lib/Lang.js';
+import { sleep } from '#Lib/Sleep.js';
+import { formatDubaiNow } from '#Lib/Time.js';
+import { sendTypingIndicator } from '#Platforms/Whatsapp/index.js';
 
 const CHATS_LIMIT = 3;
 const MESSAGES_HISTORY_LIMIT = 40;

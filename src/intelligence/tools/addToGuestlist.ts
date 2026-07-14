@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { pool, UNIQUE_ERROR_CODE } from '../../db/db.ts';
-import { insertGuestlistEntry, selectGuestlistEntry } from '../../db/guestlist.ts';
-import { selectGuestByPhone } from '../../db/guests.ts';
-import { toDateTime } from '../../lib/fmt.ts';
-import type { AgentTool, ToolContext } from './types.ts';
+import { insertGuestlistEntry, selectGuestlistEntry } from '#Db/Guestlist.js';
+import { selectGuestByPhone } from '#Db/Guests.js';
+import { pool, UNIQUE_ERROR_CODE } from '#Db/Pool.js';
+import type { AgentTool, ToolContext } from '#Intelligence/Tools/Types.js';
+import { toDateTime } from '#Lib/Fmt.js';
 
 const name = 'add_to_guestlist';
 const description = `Put the guest on the guestlist of a specific party. Call it once you have the guest's first name AND instagram. Requires the guest's own instagram saved first — returns instagram_required if missing, collect it via update_guest then retry. Idempotent — a repeated call is safe. Take party_id from the active parties list.`;

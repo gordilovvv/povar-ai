@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { pool } from '../../db/db.ts';
-import { updateGuestlistBooking } from '../../db/guestlist.ts';
-import type { AgentTool, ToolContext } from './types.ts';
+import { updateGuestlistBooking } from '#Db/Guestlist.js';
+import { pool } from '#Db/Pool.js';
+import type { AgentTool, ToolContext } from '#Intelligence/Tools/Types.js';
 
 const name = 'book_table';
 const description = `Book a table for the guest at a specific party. Call it only when the guest explicitly agreed to take a table. The guest must already be on the guestlist (add_to_guestlist). table is an optional table label/zone if the guest named one.`;

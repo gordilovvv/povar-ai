@@ -1,4 +1,4 @@
-import { Agent } from '../../src/intelligence/agent.ts';
+import { Agent } from '#Intelligence/Agent.js';
 
 // База — реальный прод-промпт. Варианты собираем патчами поверх него,
 // победивший патч и станет правкой system.md.

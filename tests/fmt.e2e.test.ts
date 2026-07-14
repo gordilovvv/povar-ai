@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { stripYo } from '../src/lib/fmt.ts';
+import { stripYo } from '#Lib/Fmt.js';
 
 describe('e2e: fmt.stripYo — убираем ё из исходящего текста', () => {
     it('меняет ё→е и Ё→Е, остальное не трогает', () => {

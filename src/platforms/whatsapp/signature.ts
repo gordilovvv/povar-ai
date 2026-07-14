@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { env } from '../../../environment.ts';
+import { env } from '#environment.js';
 
 export const verifySignature = (raw: string, header: string | null) => {
     if (!header) {

@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg';
 import format from 'pg-format';
-import { toDateTime } from '../lib/fmt.ts';
+import { toDateTime } from '#Lib/Fmt.js';
 
 export interface WaChatStorage {
     wa_phone: string;

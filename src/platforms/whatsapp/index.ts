@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { env } from '../../../environment.ts';
+import { env } from '#environment.js';
 
 const WA_API_VERSION = 'v21.0';
 

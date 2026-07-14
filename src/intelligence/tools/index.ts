@@ -1,10 +1,10 @@
-import addToGuestlist from './addToGuestlist.ts';
-import bookTable from './bookTable.ts';
-import getParties from './getParties.ts';
-import sendMessage from './sendMessage.ts';
-import showTables from './showTables.ts';
-import type { AgentTool } from './types.ts';
-import updateGuest from './updateGuest.ts';
+import addToGuestlist from '#Intelligence/Tools/AddToGuestlist.js';
+import bookTable from '#Intelligence/Tools/BookTable.js';
+import getParties from '#Intelligence/Tools/GetParties.js';
+import sendMessage from '#Intelligence/Tools/SendMessage.js';
+import showTables from '#Intelligence/Tools/ShowTables.js';
+import type { AgentTool } from '#Intelligence/Tools/Types.js';
+import updateGuest from '#Intelligence/Tools/UpdateGuest.js';
 
 export const tools: AgentTool[] = [
     sendMessage,

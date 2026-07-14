@@ -2,14 +2,14 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
-import { env } from '../../environment.ts';
-import type { PartyGuestlistStorage } from '../db/guestlist.ts';
-import type { GuestStorage } from '../db/guests.ts';
-import type { WaMessageStorage } from '../db/wa-messages.ts';
-import { toolsByName, tools as toolsList } from './tools/index.ts';
-import sendMessage from './tools/sendMessage.ts';
-import { IMAGE_PLACEHOLDER } from './tools/showTables.ts';
-import type { ToolContext } from './tools/types.ts';
+import type { PartyGuestlistStorage } from '#Db/Guestlist.js';
+import type { GuestStorage } from '#Db/Guests.js';
+import type { WaMessageStorage } from '#Db/WaMessages.js';
+import { env } from '#environment.js';
+import { toolsByName, tools as toolsList } from '#Intelligence/Tools/index.js';
+import sendMessage from '#Intelligence/Tools/SendMessage.js';
+import { IMAGE_PLACEHOLDER } from '#Intelligence/Tools/ShowTables.js';
+import type { ToolContext } from '#Intelligence/Tools/Types.js';
 
 export interface ChatContext {
     guest: GuestStorage;

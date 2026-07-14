@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
-import { Agent } from '../../src/intelligence/agent.ts';
+import { Agent } from '#Intelligence/Agent.js';
 import type { DialogResult } from './harness.ts';
 import { runDialog } from './harness.ts';
 import type { Scenario } from './scenarios.ts';

@@ -1,7 +1,7 @@
 import type { PoolClient } from 'pg';
 import format from 'pg-format';
 import { z } from 'zod';
-import { toDateTime } from '../lib/fmt.ts';
+import { toDateTime } from '#Lib/Fmt.js';
 
 export const waMessageStatusSchema = z.enum(['idle', 'sent', 'delivered', 'read', 'failed']);
 

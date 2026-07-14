@@ -1,12 +1,12 @@
 import { ulid } from 'ulid';
 import { z } from 'zod';
-import { env } from '../../../environment.ts';
-import { pool } from '../../db/db.ts';
-import { updateWaChatLastSent } from '../../db/wa-chats.ts';
-import { insertWaMessage } from '../../db/wa-messages.ts';
-import { stripLongDashes, stripYo } from '../../lib/fmt.ts';
-import { sendWhatsappText } from '../../platforms/whatsapp/index.ts';
-import type { AgentTool, ToolContext } from './types.ts';
+import { pool } from '#Db/Pool.js';
+import { updateWaChatLastSent } from '#Db/WaChats.js';
+import { insertWaMessage } from '#Db/WaMessages.js';
+import { env } from '#environment.js';
+import type { AgentTool, ToolContext } from '#Intelligence/Tools/Types.js';
+import { stripLongDashes, stripYo } from '#Lib/Fmt.js';
+import { sendWhatsappText } from '#Platforms/Whatsapp/index.js';
 
 const name = 'send_message';
 const description = `Send the guest a reply. texts is an array of short bubbles delivered in a row, like real texting. Split a thought into bubbles and send them ALL in one call, never one by one. Reply in the guest's language. This is the only way to answer the guest.`;

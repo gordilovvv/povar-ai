@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
 
-const base = readFileSync(join(process.cwd(), 'src/intelligence/system.md'), 'utf8');
+const base = readFileSync(join(process.cwd(), 'src/Intelligence/system.md'), 'utf8');
 
 type Swap = [string, string];
 

@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { pool } from '../../db/db.ts';
-import { updateGuestProfile } from '../../db/guests.ts';
-import type { AgentTool, ToolContext } from './types.ts';
+import { updateGuestProfile } from '#Db/Guests.js';
+import { pool } from '#Db/Pool.js';
+import type { AgentTool, ToolContext } from '#Intelligence/Tools/Types.js';
 
 const name = 'update_guest';
 const description = `Save collected guest data (first/last name, instagram) as the guest shares it in chat. Call it every time you learn a new field. Repeated calls are safe. Returns missing — fields not collected yet; keep asking until it is empty.`;
