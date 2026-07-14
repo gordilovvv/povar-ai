@@ -14,6 +14,64 @@ export interface ChatsCursor {
     wa_phone: string;
 }
 
+export interface ChatRow {
+    wa_phone: string;
+    first_name: string | null;
+    last_name: string | null;
+    last_message_at: string | null;
+    last_user_message_at: string | null;
+    last_bot_message_at: string | null;
+}
+
+export interface ChatMessageRow {
+    id: string;
+    text: string | null;
+    owner: string;
+    status: string | null;
+    sent_at: string | null;
+}
+
+export const selectChat = async (client: PoolClient, phone: string) => {
+    const result = await client.query<ChatRow>(
+        format(
+            `select
+                chat.wa_phone,
+                guest.first_name,
+                guest.last_name,
+                greatest(chat.last_sent_message_at, chat.last_received_message_at) as last_message_at,
+                chat.last_received_message_at as last_user_message_at,
+                chat.last_sent_message_at as last_bot_message_at
+            from wa_chats chat
+            left join guests guest on guest.id = chat.guest_id
+            where chat.wa_phone = %L`,
+            phone,
+        ),
+    );
+    return result.rows.length ? result.rows[0] : null;
+};
+
+export const selectChatMessages = async (
+    client: PoolClient,
+    phone: string,
+    lastId: string | null,
+    limit: number,
+) => {
+    const result = await client.query<ChatMessageRow>(
+        format(
+            `select id, text, owner, status, sent_at
+            from wa_messages
+            where wa_chat_phone = %L and (%L::text is null or id < %L)
+            order by id desc
+            limit %L`,
+            phone,
+            lastId,
+            lastId,
+            limit,
+        ),
+    );
+    return result.rows;
+};
+
 export const selectChatsList = async (
     client: PoolClient,
     cursor: ChatsCursor | null,

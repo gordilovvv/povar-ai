@@ -4,7 +4,7 @@
 
 Аутентификация без базы: единственный админ задан в `environment.ts` (телефон + хэш пароля). Пароль в коде не хранится и не расшифровывается — только сравнение с хэшем. Refresh-токены живут в памяти процесса (перезапуск инвалидирует все сессии).
 
-## authLoginHandler
+## authLoginHandler [x]
 
 Логин по номеру и паролю. Пароль сверяется с хэшем из env, при успехе выдаётся пара токенов.
 
@@ -15,7 +15,7 @@ body: { phone, password }
 401:  неверный phone или password
 ```
 
-## authRefreshHandler
+## authRefreshHandler [x]
 
 Обновить access-токен по refresh-токену. Валидный refresh должен присутствовать на диске и сохряняться между рестартам (для этого отдельная либа чтобы при переезде на базку легко заменили в классе либки хранилище на базку, класс AuthStorage что-то такое) процесса; ротация — старый инвалидируется, выдаётся новый.
 
@@ -37,7 +37,7 @@ sort:  lastMessageAt desc
 item:  { phone, userName, lastMessageText, lastMessageAt }[]
 ```
 
-## chatGetHandler
+## chatGetHandler [x]
 
 Вернуть конкретный чат.
 
@@ -46,7 +46,7 @@ GET /chats/:phone
 { phone, userName, lastMessageAt, lastUserMessageAt, lastBotMessageAt }
 ```
 
-## chatGetMessagesHandler
+## chatGetMessagesHandler [x]
 
 Вернуть сообщения в чате.
 
@@ -56,7 +56,7 @@ query: limit, cursor
 item:  { id, text, owner: 'user' | 'bot', status, sentAt }[]
 ```
 
-## partiesGetList
+## partiesGetList [x]
 
 Вернуть вечеринки с числом гостей.
 
@@ -67,7 +67,7 @@ sort:  по времени — активная → будущие → прош�
 item:  { id, name, location, startsAt, guestCount }[]
 ```
 
-## partyGetGuestlistList
+## partyGetGuestlistList [x]
 
 Вернуть guest-лист вечеринки для markdown-рендера.
 
