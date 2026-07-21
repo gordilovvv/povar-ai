@@ -5,8 +5,19 @@ import { toDateTime } from '#Lib/Fmt.js';
 
 export const waMessageStatusSchema = z.enum(['idle', 'sent', 'delivered', 'read', 'failed']);
 
+export const waWorkerStatusSchema = z.enum([
+    'need_processed',
+    'processing',
+    'processed',
+    'failed',
+    'skipped',
+]);
+
+export const waMessageOwnerSchema = z.enum(['ai', 'guest', 'marketing', 'sema']);
+
 type WaMessageStatus = z.infer<typeof waMessageStatusSchema>;
-type WaWorkerStatus = 'need_processed' | 'processing' | 'processed' | 'failed';
+type WaWorkerStatus = z.infer<typeof waWorkerStatusSchema>;
+type WaMessageOwner = z.infer<typeof waMessageOwnerSchema>;
 
 export const waMessageStatusRank: Record<WaMessageStatus, number> = Object.fromEntries(
     waMessageStatusSchema.options.map((status, index) => [status, index]),
@@ -17,7 +28,7 @@ export interface WaMessageStorage {
     wa_message_id: string | null;
     wa_chat_phone: string;
     text: string | null;
-    owner: string;
+    owner: WaMessageOwner;
     status: WaMessageStatus;
     worker_status: WaWorkerStatus | null;
     concurrency_version: number;
@@ -42,6 +53,34 @@ export const insertWaMessage = async (client: PoolClient, message: WaMessageInse
             message.worker_status,
             message.concurrency_version,
             toDateTime(message.sent_at),
+        ),
+    );
+};
+
+export const insertIncomingWaMessage = async (
+    client: PoolClient,
+    message: Omit<WaMessageInsert, 'worker_status'>,
+) => {
+    await client.query(
+        format(
+            `insert into wa_messages
+                (id, wa_message_id, wa_chat_phone, text, owner, status, worker_status, concurrency_version, sent_at)
+            select
+                %L, %L, %L, %L, %L, %L,
+                case when paused_at is null then %L else %L end,
+                %L, %L
+            from wa_chats where wa_phone = %L`,
+            message.id,
+            message.wa_message_id,
+            message.wa_chat_phone,
+            message.text,
+            message.owner,
+            message.status,
+            waWorkerStatusSchema.enum.need_processed,
+            waWorkerStatusSchema.enum.skipped,
+            message.concurrency_version,
+            toDateTime(message.sent_at),
+            message.wa_chat_phone,
         ),
     );
 };
@@ -108,6 +147,11 @@ export const updateWaMessagesToProcessing = async (
                         and wa_chat_phone not in (
                             select wa_chat_phone from wa_messages where worker_status = 'processing'
                         )
+                        and not exists (
+                            select 1 from wa_chats
+                            where wa_chats.wa_phone = wa_messages.wa_chat_phone
+                                and wa_chats.paused_at is not null
+                        )
                     group by wa_chat_phone
                     having max(sent_at) <= %L
                     order by min(sent_at)
@@ -128,6 +172,17 @@ export const updateWaMessagesWorkerStatus = async (
 ) => {
     await client.query(
         format('update wa_messages set worker_status = %L where id in (%L)', workerStatus, ids),
+    );
+};
+
+export const updateNeedProcessedToSkipped = async (client: PoolClient, waChatPhone: string) => {
+    await client.query(
+        format(
+            'update wa_messages set worker_status = %L where wa_chat_phone = %L and worker_status = %L',
+            waWorkerStatusSchema.enum.skipped,
+            waChatPhone,
+            waWorkerStatusSchema.enum.need_processed,
+        ),
     );
 };
 

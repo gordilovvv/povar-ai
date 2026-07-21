@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import { pool } from '#Db/Pool.js';
 import { selectWaChat, updateWaChatPaused } from '#Db/WaChats.js';
+import { updateNeedProcessedToSkipped } from '#Db/WaMessages.js';
 import { env } from '#environment.js';
-import sendMessage from '#Intelligence/Tools/SendMessage.js';
+import { sendMessages } from '#Intelligence/Tools/SendMessage.js';
 import { badInput } from '#Intelligence/Tools/Utils.js';
 import { type Lang, langSchema } from '#Lib/Lang.js';
 import type { AgentTool, ToolContext } from '#Lib/Tools.js';
@@ -36,10 +37,19 @@ const handler = async (ctx: ToolContext, raw: unknown) => {
     const client = await pool.connect();
     let paused: boolean;
     try {
+        await client.query('begin');
         paused = await updateWaChatPaused(client, ctx.phone, parsed.data.details, new Date());
         if (!paused && !(await selectWaChat(client, ctx.phone))) {
             throw new Error(`pause_chat: чата ${ctx.phone} нет в wa_chats`);
         }
+        // Если чат на паузе - скипнуть сообщения в обработке
+        if (paused) {
+            await updateNeedProcessedToSkipped(client, ctx.phone);
+        }
+        await client.query('commit');
+    } catch (error) {
+        await client.query('rollback');
+        throw error;
     } finally {
         client.release();
     }
@@ -53,7 +63,7 @@ const handler = async (ctx: ToolContext, raw: unknown) => {
 
     // Отправить сообщение по шаблону
     if (env.TEXT_AFTER_PAUSE_CHAT === 'on') {
-        await sendMessage.handler(ctx, { texts: [PAUSE_MESSAGES[parsed.data.language]] });
+        await sendMessages(ctx, [PAUSE_MESSAGES[parsed.data.language]]);
     }
 
     return RES;

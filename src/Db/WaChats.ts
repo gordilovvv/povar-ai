@@ -7,6 +7,8 @@ export interface WaChatStorage {
     guest_id: string | null;
     last_sent_message_at: string | null;
     last_received_message_at: string | null;
+    paused_at: string | null;
+    pause_details: string | null;
 }
 
 export const upsertWaChat = async (
@@ -30,6 +32,36 @@ export const upsertWaChat = async (
             toDateTime(lastReceivedMessageAt),
         ),
     );
+};
+
+export const selectWaChat = async (client: PoolClient, waPhone: string) => {
+    const result = await client.query(
+        format('select * from wa_chats where wa_phone = %L', waPhone),
+    );
+
+    return result.rows.length ? (result.rows[0] as WaChatStorage) : null;
+};
+
+export const updateWaChatPaused = async (
+    client: PoolClient,
+    waPhone: string,
+    details: string,
+    pausedAt: Date,
+) => {
+    const result = await client.query(
+        format(
+            `update wa_chats
+                set paused_at = %L,
+                    pause_details = %L
+            where wa_phone = %L and paused_at is null
+            returning wa_phone`,
+            toDateTime(pausedAt),
+            details,
+            waPhone,
+        ),
+    );
+
+    return result.rows.length > 0;
 };
 
 export const updateWaChatLastSent = async (

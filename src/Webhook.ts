@@ -7,7 +7,7 @@ import { type GuestStorage, insertGuest, selectGuestByPhone } from '#Db/Guests.j
 import { pool, UNIQUE_ERROR_CODE } from '#Db/Pool.js';
 import { upsertWaChat } from '#Db/WaChats.js';
 import {
-    insertWaMessage,
+    insertIncomingWaMessage,
     selectWaMessage,
     updateWaMessageStatus,
     waMessageStatusRank,
@@ -67,14 +67,13 @@ const handleWebhook: RequestHandler = async (request) => {
             await upsertWaChat(client, message.from, guest.id, now);
 
             try {
-                await insertWaMessage(client, {
+                await insertIncomingWaMessage(client, {
                     id: ulid(),
                     wa_message_id: message.id,
                     wa_chat_phone: message.from,
                     text: message.text?.body ?? null,
                     owner: 'guest',
                     status: 'delivered',
-                    worker_status: 'need_processed',
                     concurrency_version: 0,
                     sent_at: now,
                 });

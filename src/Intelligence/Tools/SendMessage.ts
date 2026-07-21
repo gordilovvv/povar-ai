@@ -1,11 +1,12 @@
 import { ulid } from 'ulid';
 import { z } from 'zod';
 import { pool } from '#Db/Pool.js';
-import { updateWaChatLastSent } from '#Db/WaChats.js';
+import { selectWaChat, updateWaChatLastSent } from '#Db/WaChats.js';
 import { insertWaMessage } from '#Db/WaMessages.js';
 import { env } from '#environment.js';
-import type { AgentTool, ToolContext } from '#Intelligence/Tools/Types.js';
+import { badInput } from '#Intelligence/Tools/Utils.js';
 import { stripLongDashes, stripYo } from '#Lib/Fmt.js';
+import type { AgentTool, ToolContext } from '#Lib/Tools.js';
 import { sendWhatsappText } from '#Platforms/Whatsapp/index.js';
 
 const name = 'send_message';
@@ -15,17 +16,37 @@ const input = z.object({
     texts: z.array(z.string().min(1)).min(1),
 });
 
+const PAUSED_INSTRUCTION =
+    'The chat is closed and handed to a human. Nothing was sent. Do not call any other tool. End your turn with no output.';
+
 const handler = async (ctx: ToolContext, raw: unknown) => {
     const parsed = input.safeParse(raw);
     if (!parsed.success) {
-        return { ok: false, error: 'bad_input' };
+        return badInput(parsed.error);
     }
 
-    const texts = parsed.data.texts.map((text) => stripYo(stripLongDashes(text)));
+    const client = await pool.connect();
+    let chat: Awaited<ReturnType<typeof selectWaChat>>;
+    try {
+        chat = await selectWaChat(client, ctx.phone);
+    } finally {
+        client.release();
+    }
+
+    if (chat?.paused_at) {
+        console.log(`[send_message] ${ctx.phone} paused, nothing sent`);
+        return { ok: false, error: 'chat_paused', instruction: PAUSED_INSTRUCTION };
+    }
+
+    return sendMessages(ctx, parsed.data.texts);
+};
+
+export const sendMessages = async (ctx: ToolContext, texts: string[]) => {
+    const prepared = texts.map((text) => stripYo(stripLongDashes(text)));
     const sent: { waMessageId: string; text: string }[] = [];
 
     if (env.WA_SEND === 'on') {
-        for (const text of texts) {
+        for (const text of prepared) {
             const waMessageId = await sendWhatsappText(ctx.phone, text);
             sent.push({ waMessageId, text });
             console.log(`[send_message] ${ctx.phone} sent: ${text}`);
@@ -60,12 +81,12 @@ const handler = async (ctx: ToolContext, raw: unknown) => {
     }
 
     // Дебаг режим (без реальных сообщений)
-    for (const text of texts) {
+    for (const text of prepared) {
         ctx.replies.push(text);
         console.log(`[send_message:off] ${ctx.phone}: ${text}`);
     }
 
-    return { ok: true, sent: texts.length };
+    return { ok: true, sent: prepared.length };
 };
 
 export default { name, description, input, handler } satisfies AgentTool;
