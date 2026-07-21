@@ -1,4 +1,7 @@
-export type Lang = 'ru' | 'en';
+import { z } from 'zod';
+
+export const langSchema = z.enum(['ru', 'en']);
+export type Lang = z.infer<typeof langSchema>;
 
 const MIN_LETTERS = 3;
 const RECENCY_DECAY = 0.7;

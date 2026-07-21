@@ -9,7 +9,7 @@ import { type Lang, langSchema } from '#Lib/Lang.js';
 import type { AgentTool, ToolContext } from '#Lib/Tools.js';
 
 const name = 'pause_chat';
-const description = `Hand the chat to Sema and stop replying. Call it for anything about this party that the facts do not answer — money, discounts, refunds, exceptions, complaints, special conditions, personal questions to Sema, and any other question the facts cannot answer. Not for tables — a table answer goes to add_to_guestlist. This tool is the whole reply: it closes the chat itself, so send nothing after it. details is one short line for Sema saying what the guest wants. language is the language the guest writes in; use en if it is neither Russian nor English.`;
+const description = `Hand the chat to Sema and stop replying. Call it whenever the guest needs something the party facts from get_party do not answer — money, discounts, refunds, exceptions to the rules, complaints, special conditions, personal requests to Sema, and any other question you have no facts for: never guess and never promise to check. Not for the guest's answer about a table — that is want_table in save_guest, even though both tools end the turn the same way. details is one short line in your own words telling Sema what the guest wants. language is the language the guest writes in; use en if it is neither Russian nor English. This tool is the whole reply: it answers the guest and closes the chat itself, so do not call send_message or any other tool after it — end your turn with no output.`;
 
 const input = z.object({
     details: z.string().trim().min(1),

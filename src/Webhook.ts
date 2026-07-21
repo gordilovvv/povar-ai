@@ -129,10 +129,11 @@ const handleCreateGuest = async (
         wa_phone: phone,
         first_name: null,
         last_name: null,
-        instagram_url: null,
+        instagram: null,
         came_from: fromAd ? 'ad' : 'manual',
         came_at: toDateTime(now),
         lang: null,
+        insta_asked_at: null,
     };
     try {
         await insertGuest(client, created);

@@ -10,7 +10,7 @@ import type { AgentTool, ToolContext } from '#Lib/Tools.js';
 import { sendWhatsappText } from '#Platforms/Whatsapp/index.js';
 
 const name = 'send_message';
-const description = `Send the guest a reply. texts is an array of short bubbles delivered in a row, like real texting. Split a thought into bubbles and send them ALL in one call, never one by one. Reply in the guest's language. This is the only way to answer the guest.`;
+const description = `Send the guest one or more reply bubbles on WhatsApp. This is the only thing that reaches them: anything you write outside this call is invisible to the guest. Call it on every ordinary turn of the conversation — greeting, pitching a party after get_party, asking for the name or the instagram, confirming the guest is on the guestlist, answering any question you already have the facts for, and any other reply you owe the guest. Do not call it right after pause_chat, and not after save_guest when you passed want_table — both answer the guest themselves and their result forbids it; calling anyway sends the guest a second message. Not for money, discounts, refunds, exceptions, complaints, or personal questions to Sema — that is pause_chat. texts is the bubbles you compose yourself in the language the guest writes in: split your reply into short bubbles, like real texting, and pass them ALL in one call, never one bubble per call. The result is either ok with the number of messages sent, or chat_paused — then nothing was sent because the chat is already handed to a human: call no other tool and end your turn with no output.`;
 
 const input = z.object({
     texts: z.array(z.string().min(1)).min(1),

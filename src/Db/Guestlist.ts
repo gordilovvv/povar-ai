@@ -9,6 +9,9 @@ export interface PartyGuestlistStorage {
     booked_table: boolean | null;
     booked_table_paid: boolean | null;
     joined_at: string | null;
+    friends: string[] | null;
+    table_offered_at: string | null;
+    telegram_alert_at: string | null;
 }
 
 export const selectGuestlistByGuest = async (client: PoolClient, guestId: string) => {
@@ -59,24 +62,56 @@ export const insertGuestlistEntry = async (
     );
 };
 
-export const updateGuestlistBooking = async (
+export const updateGuestlistFriends = async (
     client: PoolClient,
     partyId: string,
     guestId: string,
-    patch: { table?: string | undefined; booked_table?: boolean | undefined },
+    friends: string[],
+) => {
+    const result = await client.query<PartyGuestlistStorage>(
+        friends.length
+            ? format(
+                  `update party_guestlist set friends = array[%L]::text[]
+                  where party_id = %L and guest_id = %L
+                  returning *`,
+                  friends,
+                  partyId,
+                  guestId,
+              )
+            : format(
+                  `update party_guestlist set friends = '{}'::text[]
+                  where party_id = %L and guest_id = %L
+                  returning *`,
+                  partyId,
+                  guestId,
+              ),
+    );
+    return result.rows.length ? result.rows[0] : null;
+};
+
+/**
+ * Захват ответа про стол: сам себе замок — берёт строку только пока ответа не было.
+ * Ноль строк = на вопрос уже ответили, повтор ничего не делает.
+ */
+export const updateGuestlistTableAnswer = async (
+    client: PoolClient,
+    partyId: string,
+    guestId: string,
+    bookedTable: boolean,
+    offeredAt: string,
 ) => {
     const result = await client.query<PartyGuestlistStorage>(
         format(
             `update party_guestlist set
-                "table" = coalesce(%L, "table"),
-                booked_table = coalesce(%L, booked_table)
-            where party_id = %L and guest_id = %L
+                booked_table = %L,
+                table_offered_at = coalesce(table_offered_at, %L)
+            where party_id = %L and guest_id = %L and booked_table is null
             returning *`,
-            patch.table ?? null,
-            patch.booked_table ?? null,
+            bookedTable,
+            offeredAt,
             partyId,
             guestId,
         ),
     );
-    return result.rows[0] ?? null;
+    return result.rows.length ? result.rows[0] : null;
 };

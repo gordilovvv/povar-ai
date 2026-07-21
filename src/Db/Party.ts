@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 import format from 'pg-format';
+import { env } from '#environment.js';
 
 export interface PartyStorage {
     id: string;
@@ -28,22 +29,21 @@ export interface PartyTimeStorage {
     free_entry_before: string | null;
 }
 
-export const selectActivePartyTimes = async (client: PoolClient) => {
-    const result = await client.query<PartyTimeStorage>(
-        `select party_time.*
-        from party_time
-        where party_time.party_start_at >= now() - interval '6 hours'
-        order by party_time.party_start_at`,
-    );
-    return result.rows;
-};
+export interface PartyWithTimeStorage extends PartyStorage {
+    party_start_at: string;
+    free_entry_before: string | null;
+}
 
-export const selectActiveParties = async (client: PoolClient) => {
-    const result = await client.query<PartyStorage>(
-        `select distinct party.*
-        from party
-        join party_time on party_time.party_id = party.id
-        where party_time.party_start_at >= now() - interval '6 hours'`,
+export const selectActivePartiesWithTimes = async (client: PoolClient) => {
+    const result = await client.query<PartyWithTimeStorage>(
+        format(
+            `select party.*, party_time.party_start_at, party_time.free_entry_before
+            from party
+            join party_time on party_time.party_id = party.id
+            where party_time.party_start_at >= now() - make_interval(hours => %L::int)
+            order by party.id, party_time.party_start_at`,
+            env.PARTY_ACTIVE_HOURS,
+        ),
     );
     return result.rows;
 };

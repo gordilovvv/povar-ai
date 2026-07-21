@@ -9,10 +9,11 @@ export interface GuestStorage {
     wa_phone: string | null;
     first_name: string | null;
     last_name: string | null;
-    instagram_url: string | null;
+    instagram: string | null;
     came_from: GuestCameFrom | null;
     came_at: string | null;
     lang: GuestLang | null;
+    insta_asked_at: string | null;
 }
 
 export const selectGuestByPhone = async (client: PoolClient, waPhone: string) => {
@@ -26,14 +27,14 @@ export const insertGuest = async (client: PoolClient, guest: GuestStorage) => {
     await client.query(
         format(
             `insert into guests
-                (id, wa_phone, first_name, last_name, instagram_url, came_from, came_at, lang)
+                (id, wa_phone, first_name, last_name, instagram, came_from, came_at, lang)
             values
                 (%L, %L, %L, %L, %L, %L, %L, %L)`,
             guest.id,
             guest.wa_phone,
             guest.first_name,
             guest.last_name,
-            guest.instagram_url,
+            guest.instagram,
             guest.came_from,
             guest.came_at,
             guest.lang,
@@ -51,7 +52,8 @@ export const updateGuestProfile = async (
     patch: {
         first_name?: string | undefined;
         last_name?: string | undefined;
-        instagram_url?: string | undefined;
+        instagram?: string | undefined;
+        insta_asked_at?: string | undefined;
     },
 ) => {
     const result = await client.query<GuestStorage>(
@@ -59,12 +61,14 @@ export const updateGuestProfile = async (
             `update guests set
                 first_name = coalesce(%L, first_name),
                 last_name = coalesce(%L, last_name),
-                instagram_url = coalesce(%L, instagram_url)
+                instagram = coalesce(%L, instagram),
+                insta_asked_at = coalesce(%L, insta_asked_at)
             where id = %L
             returning *`,
             patch.first_name ?? null,
             patch.last_name ?? null,
-            patch.instagram_url ?? null,
+            patch.instagram ?? null,
+            patch.insta_asked_at ?? null,
             id,
         ),
     );

@@ -1,18 +1,9 @@
-import addToGuestlist from '#Intelligence/Tools/AddToGuestlist.js';
-import bookTable from '#Intelligence/Tools/BookTable.js';
-import getParties from '#Intelligence/Tools/GetParties.js';
+import getParty from '#Intelligence/Tools/GetParty.js';
+import pauseChat from '#Intelligence/Tools/PauseChat.js';
+import saveGuest from '#Intelligence/Tools/SaveGuest.js';
 import sendMessage from '#Intelligence/Tools/SendMessage.js';
-import showTables from '#Intelligence/Tools/ShowTables.js';
-import type { AgentTool } from '#Intelligence/Tools/Types.js';
-import updateGuest from '#Intelligence/Tools/UpdateGuest.js';
+import type { AgentTool } from '#Lib/Tools.js';
 
-export const tools: AgentTool[] = [
-    sendMessage,
-    getParties,
-    updateGuest,
-    addToGuestlist,
-    bookTable,
-    showTables,
-];
+export const tools: AgentTool[] = [sendMessage, getParty, pauseChat, saveGuest];
 
 export const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
