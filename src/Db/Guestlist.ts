@@ -16,7 +16,10 @@ export interface PartyGuestlistStorage {
 
 export const selectGuestlistByGuest = async (client: PoolClient, guestId: string) => {
     const result = await client.query<PartyGuestlistStorage>(
-        format('select * from party_guestlist where guest_id = %L', guestId),
+        format(
+            'select * from party_guestlist where guest_id = %L order by joined_at, party_id',
+            guestId,
+        ),
     );
     return result.rows;
 };

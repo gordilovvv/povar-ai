@@ -1,23 +1,15 @@
-import { selectGuestlistByGuest } from '#Db/Guestlist.js';
-import { selectGuestByPhone, updateGuestLang } from '#Db/Guests.js';
 import { pool } from '#Db/Pool.js';
 import {
-    selectWaChatMessages,
     updateProcessingToFailed,
     updateWaMessagesToProcessing,
     updateWaMessagesWorkerStatus,
     type WaMessageStorage,
 } from '#Db/WaMessages.js';
-import { env } from '#environment.js';
-import { Agent, type ChatContext } from '#Intelligence/Agent.js';
+import { Agent } from '#Intelligence/Agent.js';
 import { toDateTime } from '#Lib/Fmt.js';
-import { parseLanguage } from '#Lib/Lang.js';
 import { sleep } from '#Lib/Sleep.js';
-import { formatDubaiNow } from '#Lib/Time.js';
-import { sendTypingIndicator } from '#Platforms/Whatsapp/index.js';
 
 const CHATS_LIMIT = 3;
-const MESSAGES_HISTORY_LIMIT = 40;
 const POLL_INTERVAL_MS = 1_000;
 const BEFORE_REPLY_WINDOW_MS = 5_000;
 
@@ -56,60 +48,13 @@ const handleChat = async (phone: string, messageIds: string[]) => {
     let workerStatus: 'processed' | 'failed' = 'processed';
 
     try {
-        const startedAt = process.hrtime();
-        const context = await buildChatContext(phone);
-
-        if (env.WA_SEND === 'on') {
-            const waId = context.messages.findLast((m) => m.owner === 'guest')?.wa_message_id;
-            if (waId) void sendTypingIndicator(waId).catch(() => {});
-        }
-
-        const [seconds, nanos] = process.hrtime(startedAt);
-        console.log(
-            `[worker] chat ${phone} context collected in ${seconds}s ${Math.round(nanos / 1e6)}ms`,
-        );
-
-        await Agent.do(context);
+        await new Agent(phone).do();
     } catch (error) {
         console.error(`[worker] chat ${phone} failed`, error);
         workerStatus = 'failed';
     }
 
     await cleanChatMessagesStatus(phone, messageIds, workerStatus);
-};
-
-const buildChatContext = async (phone: string): Promise<ChatContext> => {
-    const client = await pool.connect();
-    try {
-        const guest = await selectGuestByPhone(client, phone);
-        if (!guest) {
-            throw new Error(`Unknown guest ${phone}`);
-        }
-        const messages = (
-            await selectWaChatMessages(client, phone, null, MESSAGES_HISTORY_LIMIT)
-        ).reverse(); // последние N, разворот в хронологию
-
-        // Язык пользователья
-        if (!guest.lang) {
-            const guestTexts: string[] = [];
-            for (const message of messages) {
-                if (message.owner === 'guest' && message.text) {
-                    guestTexts.push(message.text);
-                }
-            }
-            const lang = parseLanguage(guestTexts);
-            if (lang) {
-                await updateGuestLang(client, guest.id, lang);
-                guest.lang = lang;
-            }
-        }
-
-        const ownedGuestlist = await selectGuestlistByGuest(client, guest.id);
-        const now = formatDubaiNow();
-        return { guest, messages, ownedGuestlist, now };
-    } finally {
-        client.release();
-    }
 };
 
 const CLEAN_STATUS_RETRIES = 30;

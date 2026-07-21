@@ -1,308 +1,203 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
-import type { PartyGuestlistStorage } from '#Db/Guestlist.js';
-import type { GuestStorage } from '#Db/Guests.js';
 import type { WaMessageStorage } from '#Db/WaMessages.js';
 import { env } from '#environment.js';
+import { Checklist } from '#Intelligence/Checklist.js';
+import { type ChatContext, Context } from '#Intelligence/Context.js';
 import { Prompts } from '#Intelligence/Prompts.js';
-import { toolsByName, tools as toolsList } from '#Intelligence/Tools/index.js';
 import sendMessage from '#Intelligence/Tools/SendMessage.js';
+import { Tools } from '#Intelligence/Tools.js';
 import type { ToolContext } from '#Lib/Tools.js';
+import { sendTypingIndicator } from '#Platforms/Whatsapp/index.js';
 
-export interface ChatContext {
-    guest: GuestStorage;
-    messages: WaMessageStorage[];
-    ownedGuestlist: PartyGuestlistStorage[];
-    now: string;
-}
-
-/**
- * Точки подмены цикла хода: поход в модель и исполнение тула.
- * Прод отдаёт живые (`Agent.liveDeps`), тест — заглушки.
- */
-export interface TurnDeps {
-    create: (params: Anthropic.MessageCreateParamsNonStreaming) => Promise<Anthropic.Message>;
-    runTool: (name: string, input: unknown, ctx: ToolContext) => Promise<unknown>;
-    toolDefs: Anthropic.Tool[];
-}
-
-export interface TurnStats {
-    steps: number;
-    inputTokens: number;
-    outputTokens: number;
-    cacheRead: number;
-    cacheWrite: number;
-}
+type CreateMessage = (
+    params: Anthropic.MessageCreateParamsNonStreaming,
+) => Promise<Anthropic.Message>;
 
 export class Agent {
-    static client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+    private static readonly client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+    private static readonly tools = new Tools();
 
-    static toolDefs: Anthropic.Tool[] = toolsList.map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        input_schema: z.toJSONSchema(tool.input) as Anthropic.Tool.InputSchema,
-    }));
+    private static readonly MAX_STEPS = 12;
+    private static readonly MAX_TOKENS = 1024;
 
-    static MAX_STEPS = 12;
-    static MAX_TOKENS = 1024;
-
-    static liveDeps: TurnDeps = {
-        create: (params) => Agent.client.messages.create(params),
-        runTool: async (name, input, ctx) => {
-            const tool = toolsByName.get(name);
-            return tool ? await tool.handler(ctx, input) : { ok: false, error: 'unknown_tool' };
-        },
-        get toolDefs() {
-            return Agent.toolDefs;
-        },
+    private static readonly LANG = {
+        en: 'The guest writes in ENGLISH — reply ONLY in English.',
+        ru: 'The guest writes in RUSSIAN — reply in Russian.',
     };
+    private static readonly UNKNOWN_LANG = 'Reply in the language the guest writes in.';
+    private static readonly SILENT_GUEST =
+        '(the guest is silent — open the dialog with a warm greeting)';
+    private static readonly GUEST_MEDIA = '(the guest sent media)';
+    private static readonly NUDGE = '(You did not message the guest. Reply now via send_message.)';
 
-    static async do(context: ChatContext): Promise<string[]> {
+    /** Тул сам ответил гостю и запретил писать поверх: под это страховки обязаны молчать. */
+    private static readonly REPLY_FORBIDDEN = z.union([
+        z.object({ ok: z.literal(true), instruction: z.string() }),
+        z.object({ error: z.literal('chat_paused') }),
+    ]);
+
+    constructor(
+        readonly phone: string,
+        private readonly create: CreateMessage = (params) => Agent.client.messages.create(params),
+    ) {}
+
+    async do(): Promise<string[]> {
+        const context = await Context.load(this.phone);
+        const { guest, chat, messages: history } = context.context;
+
+        if (chat?.paused_at) {
+            console.log(`[agent] ${this.phone} chat is paused, turn skipped`);
+            return [];
+        }
+
         const replies: string[] = [];
-        const ctx: ToolContext = {
-            guestId: context.guest.id,
-            phone: context.guest.wa_phone ?? '',
-            replies,
-        };
+        const ctx: ToolContext = { guestId: guest.id, phone: this.phone, replies };
 
-        const startedAt = process.hrtime();
-        const messages = Agent.buildMessages(context.messages);
-        const system = Agent.buildSystem(context);
+        if (env.WA_SEND === 'on') {
+            const waId = history.findLast((message) => message.owner === 'guest')?.wa_message_id;
+            if (waId) {
+                void sendTypingIndicator(waId).catch((error) =>
+                    console.error(`[agent] ${this.phone} typing indicator failed`, error),
+                );
+            }
+        }
 
-        const stats = await Agent.runTurn(system, messages, ctx, Agent.liveDeps);
-
-        const [sec, nano] = process.hrtime(startedAt);
-        console.log(
-            `[agent] ${ctx.phone} turn done: ${stats.steps} steps, ${replies.length} replies, ${sec}s ${Math.round(nano / 1e6)}ms, tokens in=${stats.inputTokens} cacheR=${stats.cacheRead} cacheW=${stats.cacheWrite} out=${stats.outputTokens}`,
-        );
+        await this.loop(context, Agent.buildMessages(history), ctx);
 
         return replies;
     }
 
-    /**
-     * Цикл одного хода: модель ↔ тулы, до текстового ответа или потолка шагов.
-     * Реплики копятся в `ctx.replies`, `messages` дописывается по ходу (мутируется);
-     * всё внешнее приходит через `deps`.
-     */
-    static async runTurn(
-        system: Anthropic.TextBlockParam[],
+    /** Реплики копятся в `ctx.replies`, `messages` дописывается по ходу. */
+    private async loop(
+        context: Context,
         messages: Anthropic.MessageParam[],
         ctx: ToolContext,
-        deps: TurnDeps,
-    ): Promise<TurnStats> {
-        const stats: TurnStats = {
-            steps: 0,
-            inputTokens: 0,
-            outputTokens: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-        };
-        let retriedEmptyReply = false;
+    ): Promise<void> {
+        const startedAt = process.hrtime();
+        const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+        let steps = 0;
+        let replyForbidden = false;
+        let nudged = false;
 
         for (let step = 0; step < Agent.MAX_STEPS; step++) {
-            stats.steps = step + 1;
-            const response = await deps.create({
+            steps = step + 1;
+
+            const response = await this.create({
                 model: env.ANTHROPIC_MODEL,
                 max_tokens: Agent.MAX_TOKENS,
-                system,
-                tools: deps.toolDefs,
+                system: Agent.buildSystem(context.context),
+                tools: Agent.tools.defs(),
                 messages,
             });
             messages.push({ role: 'assistant', content: response.content });
-            stats.inputTokens += response.usage.input_tokens;
-            stats.outputTokens += response.usage.output_tokens;
-            stats.cacheRead += response.usage.cache_read_input_tokens ?? 0;
-            stats.cacheWrite += response.usage.cache_creation_input_tokens ?? 0;
+
+            usage.input += response.usage.input_tokens;
+            usage.output += response.usage.output_tokens;
+            usage.cacheRead += response.usage.cache_read_input_tokens ?? 0;
+            usage.cacheWrite += response.usage.cache_creation_input_tokens ?? 0;
 
             const toolUses = response.content.filter((block) => block.type === 'tool_use');
             console.log(
-                `[agent] ${ctx.phone} step ${step} stop=${response.stop_reason} tools=${toolUses.map((t) => t.name).join(',') || '-'} in=${response.usage.input_tokens} out=${response.usage.output_tokens}`,
+                `[agent] ${this.phone} step ${step} stop=${response.stop_reason} tools=${toolUses.map((tool) => tool.name).join(',') || '-'} in=${response.usage.input_tokens} out=${response.usage.output_tokens}`,
             );
 
-            if (response.stop_reason !== 'tool_use' || !toolUses.length) {
-                // модель ответила текстом мимо send_message, не теряем реплику — шлём сами
-                if (!ctx.replies.length) {
-                    const bubbles: string[] = [];
-                    for (const block of response.content) {
-                        if (block.type !== 'text') {
-                            continue;
-                        }
-                        for (const line of block.text.split('\n')) {
-                            const bubble = line.trim();
-                            if (bubble) {
-                                bubbles.push(bubble);
-                            }
-                        }
-                    }
-                    if (bubbles.length) {
-                        await deps.runTool(sendMessage.name, { texts: bubbles }, ctx);
-                    }
-                }
-                // модель завершила ход, не написав гостю — один раз подталкиваем ответить
-                if (!ctx.replies.length && !retriedEmptyReply) {
-                    retriedEmptyReply = true;
-                    messages.push({
-                        role: 'user',
-                        content: '(You did not message the guest. Reply now via send_message.)',
+            if (toolUses.length) {
+                const results: Anthropic.ToolResultBlockParam[] = [];
+                for (const toolUse of toolUses) {
+                    const output = await Agent.tools.run(toolUse.name, toolUse.input, ctx);
+                    replyForbidden ||= Agent.REPLY_FORBIDDEN.safeParse(output).success;
+                    console.log(
+                        `[agent] ${this.phone} tool ${toolUse.name} → ${JSON.stringify(output)}`,
+                    );
+                    results.push({
+                        type: 'tool_result',
+                        tool_use_id: toolUse.id,
+                        content: JSON.stringify(output),
                     });
-                    continue;
                 }
+                // все результаты одним сообщением: разбиение отучает модель от параллельных вызовов
+                messages.push({ role: 'user', content: results });
+                await context.refresh();
+                continue;
+            }
+
+            // ответ обрезан на полуслове — дослать его гостю хуже, чем промолчать
+            if (response.stop_reason === 'max_tokens') {
+                console.error(`[agent] ${this.phone} step ${step} hit max_tokens, reply dropped`);
                 break;
             }
 
-            const results: Anthropic.ToolResultBlockParam[] = [];
-            for (const toolUse of toolUses) {
-                const output = await deps.runTool(toolUse.name, toolUse.input, ctx);
-                console.log(
-                    `[agent] ${ctx.phone} tool ${toolUse.name} → ${JSON.stringify(output)}`,
-                );
-                results.push({
-                    type: 'tool_result',
-                    tool_use_id: toolUse.id,
-                    content: JSON.stringify(output),
-                });
+            if (ctx.replies.length || replyForbidden) {
+                break;
             }
-            messages.push({ role: 'user', content: results });
+
+            const bubbles = response.content.flatMap((block) =>
+                block.type === 'text'
+                    ? block.text
+                          .split('\n')
+                          .map((line) => line.trim())
+                          .filter(Boolean)
+                    : [],
+            );
+            if (bubbles.length) {
+                await Agent.tools.run(sendMessage.name, { texts: bubbles }, ctx);
+                break;
+            }
+
+            if (nudged) {
+                break;
+            }
+            nudged = true;
+            messages.push({ role: 'user', content: Agent.NUDGE });
         }
 
-        return stats;
+        if (!ctx.replies.length && !replyForbidden) {
+            console.error(`[agent] ${this.phone} turn ended with no reply after ${steps} steps`);
+        }
+
+        const [seconds, nanos] = process.hrtime(startedAt);
+        console.log(
+            `[agent] ${this.phone} turn done: ${steps} steps, ${ctx.replies.length} replies, ${seconds}s ${Math.round(nanos / 1e6)}ms, tokens in=${usage.input} cacheR=${usage.cacheRead} cacheW=${usage.cacheWrite} out=${usage.output}`,
+        );
     }
 
-    static buildMessages(history: WaMessageStorage[]): Anthropic.MessageParam[] {
+    private static buildSystem(context: ChatContext): Anthropic.TextBlockParam[] {
+        return [
+            {
+                type: 'text',
+                text: [Prompts.system, Prompts.checklist, Prompts.tools].join('\n\n'),
+                cache_control: { type: 'ephemeral' },
+            },
+            {
+                type: 'text',
+                text: [
+                    context.guest.lang ? Agent.LANG[context.guest.lang] : Agent.UNKNOWN_LANG,
+                    `Dubai time now: ${context.now}.`,
+                    Checklist.create(context),
+                ].join('\n\n'),
+            },
+        ];
+    }
+
+    private static buildMessages(history: WaMessageStorage[]): Anthropic.MessageParam[] {
         const messages: Anthropic.MessageParam[] = [];
         for (const message of history) {
-            if (!message.text) {
-                continue;
+            if (message.owner === 'guest') {
+                messages.push({ role: 'user', content: message.text || Agent.GUEST_MEDIA });
+            } else if (message.text) {
+                messages.push({ role: 'assistant', content: message.text });
             }
-            messages.push({
-                role: message.owner === 'guest' ? 'user' : 'assistant',
-                content: message.text,
-            });
         }
-        const last = messages[messages.length - 1];
-        if (last?.role !== 'user') {
-            messages.push({
-                role: 'user',
-                content: '(the guest is silent — open the dialog with a warm greeting)',
-            });
+
+        // API отбивает историю, которая начинается не с гостя
+        while (messages.length && messages[0]?.role !== 'user') {
+            messages.shift();
         }
+        if (messages.at(-1)?.role !== 'user') {
+            messages.push({ role: 'user', content: Agent.SILENT_GUEST });
+        }
+
         return messages;
     }
-
-    static buildSystem = (context: ChatContext): Anthropic.TextBlockParam[] => {
-        const lang = context.guest.lang || 'en';
-        const langLine =
-            lang === 'en'
-                ? 'The guest writes in ENGLISH — reply ONLY in English, not a word of Russian.'
-                : 'The guest writes in RUSSIAN — reply in Russian.';
-
-        const known: string[] = [];
-        if (context.guest.first_name) known.push(`first name: ${context.guest.first_name}`);
-        if (context.guest.last_name) known.push(`last name: ${context.guest.last_name}`);
-        if (context.guest.instagram) known.push(`instagram: ${context.guest.instagram}`);
-        if (context.guest.came_from === 'ad') known.push('came from an ad');
-
-        const onLists: string[] = [];
-        for (const entry of context.ownedGuestlist) {
-            const booked = entry.booked_table ? ' (table booked)' : '';
-            onLists.push(`party ${entry.party_id}${booked}`);
-        }
-
-        const tail = [
-            `Language: ${langLine}`,
-            `Known about guest: ${known.length ? known.join('; ') : 'nothing yet — collect name and instagram'}`,
-            `On guestlists: ${onLists.length ? onLists.join('; ') : 'none'}`,
-            Agent.buildFlowState(context),
-            `Dubai time now: ${context.now}.`,
-        ].join('\n');
-
-        return [
-            { type: 'text', text: Prompts.system, cache_control: { type: 'ephemeral' } },
-            { type: 'text', text: tail },
-        ];
-    };
-
-    static buildFlowState = (context: ChatContext): string => {
-        const semaTexts: string[] = [];
-        const guestTexts: string[] = [];
-        for (const message of context.messages) {
-            if (!message.text) {
-                continue;
-            }
-            if (message.owner === 'sema') {
-                semaTexts.push(message.text);
-            }
-            if (message.owner === 'guest') {
-                guestTexts.push(message.text);
-            }
-        }
-
-        const nameDone = !!context.guest.first_name;
-        const guestlistDone = context.ownedGuestlist.length > 0;
-        const instaDone = !!context.guest.instagram;
-        // вопрос про инсту гостя, но не follow-up с нашей ссылкой/подпиской
-        const instaAsked = semaTexts.some(
-            (t) => /инст|insta/i.test(t) && !/подпи|follow|instagram\.com/i.test(t),
-        );
-        const followupDone = semaTexts.some((t) => t.includes('instagram.com'));
-        const tableBooked = context.ownedGuestlist.some((entry) => entry.booked_table);
-        const tableAsked = guestTexts.some((t) => /стол|table/i.test(t));
-        // стол считаем обсуждаемым по репликам гостя — свой безответный оффер не в счёт
-        const tableTalk = tableBooked || tableAsked;
-
-        const lines: string[] = [];
-        if (tableBooked) {
-            lines.push('[✓] table — booked');
-        } else if (tableAsked) {
-            lines.push(
-                '[→] TABLE — the guest is asking about a table: acknowledge it in your VERY NEXT reply and drive to the booking. Name → guestlist are prerequisites for book_table — weave them into the table flow, never answer with the guestlist pitch alone. Instagram is NOT a prerequisite — never gate the booking on it. Once the guest agrees and the party + size are known from the chat — call book_table immediately, no extra clarifying questions.',
-            );
-        }
-        lines.push(
-            nameDone
-                ? '[✓] name — collected'
-                : '[→] collect first+last name ("пришли имя фамилию")',
-        );
-        if (guestlistDone) {
-            lines.push('[✓] guestlist — added');
-        } else if (nameDone) {
-            lines.push(
-                '[→] add to guestlist silently + confirm with entry conditions; if the party is unclear, fork: ask which party — nothing else',
-            );
-        } else {
-            lines.push('[ ] guestlist — after the name');
-        }
-        if (instaDone) {
-            lines.push('[✓] instagram — collected');
-        } else if (instaAsked) {
-            lines.push(
-                '[…] instagram — ALREADY ASKED, awaiting answer. Do NOT repeat the question now. If the guest ignored it, move on; you may weave ONE soft re-ask into a later reply when the guest is engaged again.',
-            );
-        } else if (guestlistDone) {
-            lines.push(
-                "[→] ask for the guest's instagram; if the guest just asked a question, answer it AND ask in the SAME reply",
-            );
-        } else {
-            lines.push('[ ] instagram — later');
-        }
-        if (tableTalk) {
-            lines.push(
-                '[✗] instagram follow-up — SKIP: a table is discussed/booked. Do NOT send the insta link.',
-            );
-        } else if (followupDone) {
-            lines.push('[✓] instagram follow-up — sent');
-        } else if (guestlistDone) {
-            lines.push(
-                '[→] after the guestlist confirm: send the instagram follow-up with the link, unprompted',
-            );
-        } else {
-            lines.push('[ ] instagram follow-up — later');
-        }
-
-        const anyCurrent = lines.some((line) => line.startsWith('[→]'));
-        const footer = anyCurrent
-            ? 'Do the [→] steps (after handling what the guest just said). [✗] and […] are hard constraints — never violate them.'
-            : 'Nothing pending. Fork: EITHER offer a table once (if not offered yet) OR just close warm.';
-        return `Flow state (computed from the real saved state and chat — trust it over your own reading):\n${lines.join('\n')}\n${footer}`;
-    };
 }

@@ -43,7 +43,10 @@ export const insertGuest = async (client: PoolClient, guest: GuestStorage) => {
 };
 
 export const updateGuestLang = async (client: PoolClient, id: string, lang: GuestLang) => {
-    await client.query(format('update guests set lang = %L where id = %L', lang, id));
+    const result = await client.query<GuestStorage>(
+        format('update guests set lang = %L where id = %L and lang is null returning *', lang, id),
+    );
+    return result.rows.length ? result.rows[0] : null;
 };
 
 export const updateGuestProfile = async (
