@@ -1,15 +1,13 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import type { PartyGuestlistStorage } from '#Db/Guestlist.js';
 import type { GuestStorage } from '#Db/Guests.js';
 import type { WaMessageStorage } from '#Db/WaMessages.js';
 import { env } from '#environment.js';
+import { Prompts } from '#Intelligence/Prompts.js';
 import { toolsByName, tools as toolsList } from '#Intelligence/Tools/index.js';
 import sendMessage from '#Intelligence/Tools/SendMessage.js';
-import { IMAGE_PLACEHOLDER } from '#Intelligence/Tools/ShowTables.js';
-import type { ToolContext } from '#Intelligence/Tools/Types.js';
+import type { ToolContext } from '#Lib/Tools.js';
 
 export interface ChatContext {
     guest: GuestStorage;
@@ -18,9 +16,26 @@ export interface ChatContext {
     now: string;
 }
 
+/**
+ * Точки подмены цикла хода: поход в модель и исполнение тула.
+ * Прод отдаёт живые (`Agent.liveDeps`), тест — заглушки.
+ */
+export interface TurnDeps {
+    create: (params: Anthropic.MessageCreateParamsNonStreaming) => Promise<Anthropic.Message>;
+    runTool: (name: string, input: unknown, ctx: ToolContext) => Promise<unknown>;
+    toolDefs: Anthropic.Tool[];
+}
+
+export interface TurnStats {
+    steps: number;
+    inputTokens: number;
+    outputTokens: number;
+    cacheRead: number;
+    cacheWrite: number;
+}
+
 export class Agent {
     static client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-    static system = readFileSync(join(import.meta.dirname, 'system.md'), 'utf8');
 
     static toolDefs: Anthropic.Tool[] = toolsList.map((tool) => ({
         name: tool.name,
@@ -30,6 +45,17 @@ export class Agent {
 
     static MAX_STEPS = 12;
     static MAX_TOKENS = 1024;
+
+    static liveDeps: TurnDeps = {
+        create: (params) => Agent.client.messages.create(params),
+        runTool: async (name, input, ctx) => {
+            const tool = toolsByName.get(name);
+            return tool ? await tool.handler(ctx, input) : { ok: false, error: 'unknown_tool' };
+        },
+        get toolDefs() {
+            return Agent.toolDefs;
+        },
+    };
 
     static async do(context: ChatContext): Promise<string[]> {
         const replies: string[] = [];
@@ -43,28 +69,50 @@ export class Agent {
         const messages = Agent.buildMessages(context.messages);
         const system = Agent.buildSystem(context);
 
-        let inputTokens = 0;
-        let outputTokens = 0;
-        let cacheRead = 0;
-        let cacheWrite = 0;
+        const stats = await Agent.runTurn(system, messages, ctx, Agent.liveDeps);
+
+        const [sec, nano] = process.hrtime(startedAt);
+        console.log(
+            `[agent] ${ctx.phone} turn done: ${stats.steps} steps, ${replies.length} replies, ${sec}s ${Math.round(nano / 1e6)}ms, tokens in=${stats.inputTokens} cacheR=${stats.cacheRead} cacheW=${stats.cacheWrite} out=${stats.outputTokens}`,
+        );
+
+        return replies;
+    }
+
+    /**
+     * Цикл одного хода: модель ↔ тулы, до текстового ответа или потолка шагов.
+     * Реплики копятся в `ctx.replies`, `messages` дописывается по ходу (мутируется);
+     * всё внешнее приходит через `deps`.
+     */
+    static async runTurn(
+        system: Anthropic.TextBlockParam[],
+        messages: Anthropic.MessageParam[],
+        ctx: ToolContext,
+        deps: TurnDeps,
+    ): Promise<TurnStats> {
+        const stats: TurnStats = {
+            steps: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+        };
         let retriedEmptyReply = false;
 
-        let steps = 0;
-
         for (let step = 0; step < Agent.MAX_STEPS; step++) {
-            steps = step + 1;
-            const response = await Agent.client.messages.create({
+            stats.steps = step + 1;
+            const response = await deps.create({
                 model: env.ANTHROPIC_MODEL,
                 max_tokens: Agent.MAX_TOKENS,
                 system,
-                tools: Agent.toolDefs,
+                tools: deps.toolDefs,
                 messages,
             });
             messages.push({ role: 'assistant', content: response.content });
-            inputTokens += response.usage.input_tokens;
-            outputTokens += response.usage.output_tokens;
-            cacheRead += response.usage.cache_read_input_tokens ?? 0;
-            cacheWrite += response.usage.cache_creation_input_tokens ?? 0;
+            stats.inputTokens += response.usage.input_tokens;
+            stats.outputTokens += response.usage.output_tokens;
+            stats.cacheRead += response.usage.cache_read_input_tokens ?? 0;
+            stats.cacheWrite += response.usage.cache_creation_input_tokens ?? 0;
 
             const toolUses = response.content.filter((block) => block.type === 'tool_use');
             console.log(
@@ -72,10 +120,8 @@ export class Agent {
             );
 
             if (response.stop_reason !== 'tool_use' || !toolUses.length) {
-                // картинка без текста ответом не считается
-                const hasTextReply = replies.some((text) => text !== IMAGE_PLACEHOLDER);
                 // модель ответила текстом мимо send_message, не теряем реплику — шлём сами
-                if (!hasTextReply) {
+                if (!ctx.replies.length) {
                     const bubbles: string[] = [];
                     for (const block of response.content) {
                         if (block.type !== 'text') {
@@ -89,11 +135,11 @@ export class Agent {
                         }
                     }
                     if (bubbles.length) {
-                        await sendMessage.handler(ctx, { texts: bubbles });
+                        await deps.runTool(sendMessage.name, { texts: bubbles }, ctx);
                     }
                 }
                 // модель завершила ход, не написав гостю — один раз подталкиваем ответить
-                if (!replies.some((text) => text !== IMAGE_PLACEHOLDER) && !retriedEmptyReply) {
+                if (!ctx.replies.length && !retriedEmptyReply) {
                     retriedEmptyReply = true;
                     messages.push({
                         role: 'user',
@@ -106,16 +152,7 @@ export class Agent {
 
             const results: Anthropic.ToolResultBlockParam[] = [];
             for (const toolUse of toolUses) {
-                const tool = toolsByName.get(toolUse.name);
-                let output: unknown;
-                try {
-                    output = tool
-                        ? await tool.handler(ctx, toolUse.input)
-                        : { ok: false, error: 'unknown_tool' };
-                } catch (error) {
-                    console.error(`[agent] ${ctx.phone} tool ${toolUse.name} threw`, error);
-                    output = { ok: false, error: 'tool_failed' };
-                }
+                const output = await deps.runTool(toolUse.name, toolUse.input, ctx);
                 console.log(
                     `[agent] ${ctx.phone} tool ${toolUse.name} → ${JSON.stringify(output)}`,
                 );
@@ -128,12 +165,7 @@ export class Agent {
             messages.push({ role: 'user', content: results });
         }
 
-        const [sec, nano] = process.hrtime(startedAt);
-        console.log(
-            `[agent] ${ctx.phone} turn done: ${steps} steps, ${replies.length} replies, ${sec}s ${Math.round(nano / 1e6)}ms, tokens in=${inputTokens} cacheR=${cacheRead} cacheW=${cacheWrite} out=${outputTokens}`,
-        );
-
-        return replies;
+        return stats;
     }
 
     static buildMessages(history: WaMessageStorage[]): Anthropic.MessageParam[] {
@@ -167,7 +199,7 @@ export class Agent {
         const known: string[] = [];
         if (context.guest.first_name) known.push(`first name: ${context.guest.first_name}`);
         if (context.guest.last_name) known.push(`last name: ${context.guest.last_name}`);
-        if (context.guest.instagram_url) known.push(`instagram: ${context.guest.instagram_url}`);
+        if (context.guest.instagram) known.push(`instagram: ${context.guest.instagram}`);
         if (context.guest.came_from === 'ad') known.push('came from an ad');
 
         const onLists: string[] = [];
@@ -185,7 +217,7 @@ export class Agent {
         ].join('\n');
 
         return [
-            { type: 'text', text: Agent.system, cache_control: { type: 'ephemeral' } },
+            { type: 'text', text: Prompts.system, cache_control: { type: 'ephemeral' } },
             { type: 'text', text: tail },
         ];
     };
@@ -207,7 +239,7 @@ export class Agent {
 
         const nameDone = !!context.guest.first_name;
         const guestlistDone = context.ownedGuestlist.length > 0;
-        const instaDone = !!context.guest.instagram_url;
+        const instaDone = !!context.guest.instagram;
         // вопрос про инсту гостя, но не follow-up с нашей ссылкой/подпиской
         const instaAsked = semaTexts.some(
             (t) => /инст|insta/i.test(t) && !/подпи|follow|instagram\.com/i.test(t),

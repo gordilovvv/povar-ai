@@ -29,7 +29,7 @@ export const partyGetGuestlistListHandler: RequestHandler<IRequest> = async (req
         items.push({
             firstName: row.first_name,
             lastName: row.last_name,
-            instagram: row.instagram_url,
+            instagram: row.instagram,
         });
     }
 

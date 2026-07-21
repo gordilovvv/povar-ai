@@ -59,11 +59,10 @@ async function seed(): Promise<void> {
     await withClient(async (client) => {
         for (const party of PARTIES) {
             const id = ID.get(party.key) ?? '';
-            await client.query(`insert into party (id, name, location) values ($1, $2, $3)`, [
-                id,
-                `Party ${party.key}`,
-                `Loc ${party.key}`,
-            ]);
+            await client.query(
+                `insert into party (id, name, location, type) values ($1, $2, $3, 'owned')`,
+                [id, `Party ${party.key}`, `Loc ${party.key}`],
+            );
             if (party.offset !== null) {
                 await client.query(
                     `insert into party_time (party_id, party_start_at) values ($1, $2)`,
@@ -77,7 +76,7 @@ async function seed(): Promise<void> {
         for (let i = 0; i < 2; i++) {
             const guestId = ulid();
             await client.query(
-                `insert into guests (id, wa_phone, first_name, last_name, instagram_url)
+                `insert into guests (id, wa_phone, first_name, last_name, instagram)
                  values ($1, $2, $3, $4, $5)`,
                 [guestId, GUEST_PHONES[i], `First${i}`, `Last${i}`, `https://insta/${i}`],
             );
@@ -222,7 +221,7 @@ describe('e2e: dashboard partiesGetList + partyGetGuestlistList', () => {
                 { firstName: 'First0', lastName: 'Last0', instagram: 'https://insta/0' },
                 { firstName: 'First1', lastName: 'Last1', instagram: 'https://insta/1' },
             ],
-            'гости по joined_at asc, instagram из instagram_url',
+            'гости по joined_at asc, instagram из instagram',
         );
     });
 

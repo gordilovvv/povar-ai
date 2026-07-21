@@ -14,7 +14,7 @@ export interface PartyListRow {
 export interface GuestlistRow {
     first_name: string | null;
     last_name: string | null;
-    instagram_url: string | null;
+    instagram: string | null;
 }
 
 /**
@@ -87,7 +87,7 @@ export const selectPartiesList = async (
 export const selectPartyGuestlist = async (client: PoolClient, partyId: string) => {
     const result = await client.query<GuestlistRow>(
         format(
-            `select guest.first_name, guest.last_name, guest.instagram_url
+            `select guest.first_name, guest.last_name, guest.instagram
             from party_guestlist list
             join guests guest on guest.id = list.guest_id
             where list.party_id = %L

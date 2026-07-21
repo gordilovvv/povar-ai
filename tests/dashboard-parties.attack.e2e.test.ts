@@ -64,11 +64,10 @@ async function cleanup(): Promise<void> {
 
 async function seed(): Promise<void> {
     await withClient(async (client) => {
-        await client.query(`insert into party (id, name, location) values ($1, $2, $3)`, [
-            ACTIVE_ID,
-            'Atk active',
-            'Atk loc',
-        ]);
+        await client.query(
+            `insert into party (id, name, location, type) values ($1, $2, $3, 'owned')`,
+            [ACTIVE_ID, 'Atk active', 'Atk loc'],
+        );
         // Два party_time на одну party — проверяем что guestCount не раздувается и строка не двоится.
         await client.query(`insert into party_time (party_id, party_start_at) values ($1, $2)`, [
             ACTIVE_ID,
@@ -80,7 +79,7 @@ async function seed(): Promise<void> {
         ]);
         const guestId = ulid();
         await client.query(
-            `insert into guests (id, wa_phone, first_name, last_name, instagram_url)
+            `insert into guests (id, wa_phone, first_name, last_name, instagram)
              values ($1, $2, $3, $4, $5)`,
             [guestId, GUEST_PHONE, 'A', 'B', null],
         );

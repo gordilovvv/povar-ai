@@ -13,11 +13,9 @@
   "scripts": {
     "dev": "tsx watch --conditions=development --env-file=.env.dev src/Webhook.ts",
     "dev:worker": "tsx watch --conditions=development --env-file=.env.dev src/Worker.ts",
-    "build": "tsc && cp src/Intelligence/system.md dist/Intelligence/system.md",
+    "build": "tsc && cp -R src/Intelligence/Prompts dist/Intelligence/Prompts",
     "prod": "node --env-file=.env.prod dist/Webhook.js",
     "prod:worker": "node --env-file=.env.prod dist/Worker.js",
-    "test": "node --import tsx --conditions=development --env-file-if-exists=.env.dev --test 'tests/*.test.ts'",
-    "test:agent": "node --import tsx --conditions=development --env-file-if-exists=.env.dev --test 'tests/agent/*.test.ts'",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",

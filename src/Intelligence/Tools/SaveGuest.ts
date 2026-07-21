@@ -7,7 +7,7 @@ import {
     updateGuestlistTableAnswer,
 } from '#Db/Guestlist.js';
 import { updateGuestProfile } from '#Db/Guests.js';
-import { pool, UNIQUE_ERROR_CODE } from '#Db/Pool.js';
+import { FOREIGN_KEY_ERROR_CODE, pool, UNIQUE_ERROR_CODE } from '#Db/Pool.js';
 import pauseChat from '#Intelligence/Tools/PauseChat.js';
 import { sendMessages } from '#Intelligence/Tools/SendMessage.js';
 import { badInput } from '#Intelligence/Tools/Utils.js';
@@ -27,6 +27,16 @@ const input = z.object({
     friends: z.array(z.string().trim().min(1)).optional(),
     want_table: z.boolean().optional(),
 });
+
+const PARTY_FK_CONSTRAINT = 'party_guestlist_party_id_fkey';
+
+const UNKNOWN_PARTY = {
+    ok: false,
+    error: 'unknown_party',
+    field: 'party_id',
+    instruction:
+        'There is no party with this party_id and nothing was saved. Call get_party and call this tool again with a party_id from its result.',
+} as const;
 
 const TABLE_MESSAGES: Record<Lang, string> = {
     ru: 'Заглушка: гость хочет стол',
@@ -56,7 +66,10 @@ const handler = async (ctx: ToolContext, raw: unknown) => {
     let lang: Lang;
     let answered = false;
     try {
-        await ensureGuestlistEntry(client, party_id, ctx.guestId, now);
+        if ((await ensureGuestlistEntry(client, party_id, ctx.guestId, now)) === 'unknown_party') {
+            console.log(`[save_guest] ${ctx.phone} unknown party_id ${party_id}`);
+            return UNKNOWN_PARTY;
+        }
         if (friends) {
             await updateGuestlistFriends(client, party_id, ctx.guestId, friends);
         }
@@ -72,7 +85,7 @@ const handler = async (ctx: ToolContext, raw: unknown) => {
         }
         const guest = await updateGuestProfile(client, ctx.guestId, {
             ...profile,
-            insta_asked_at: insta_asked ? now : undefined,
+            instagram_asked_at: insta_asked ? now : undefined,
         });
         lang = guest?.lang ?? 'en';
     } finally {
@@ -113,17 +126,22 @@ const ensureGuestlistEntry = async (
     partyId: string,
     guestId: string,
     joinedAt: string,
-): Promise<void> => {
+): Promise<'ok' | 'unknown_party'> => {
     if (await selectGuestlistEntry(client, partyId, guestId)) {
-        return;
+        return 'ok';
     }
     try {
         await insertGuestlistEntry(client, partyId, guestId, joinedAt);
+        return 'ok';
     } catch (error) {
-        if ((error as { code?: string }).code !== UNIQUE_ERROR_CODE) {
-            throw error;
+        const { code, constraint } = error as { code?: string; constraint?: string };
+        if (code === UNIQUE_ERROR_CODE) {
+            return ensureGuestlistEntry(client, partyId, guestId, joinedAt);
         }
-        return ensureGuestlistEntry(client, partyId, guestId, joinedAt);
+        if (code === FOREIGN_KEY_ERROR_CODE && constraint === PARTY_FK_CONSTRAINT) {
+            return 'unknown_party';
+        }
+        throw error;
     }
 };
 
