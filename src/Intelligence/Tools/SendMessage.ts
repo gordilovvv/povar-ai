@@ -6,6 +6,7 @@ import { insertWaMessage } from '#Db/WaMessages.js';
 import { env } from '#environment.js';
 import { badInput } from '#Intelligence/Tools/Utils.js';
 import { stripLongDashes, stripYo } from '#Lib/Fmt.js';
+import { Logger } from '#Lib/Logger.js';
 import type { AgentTool, ToolContext } from '#Lib/Tools.js';
 import { sendWhatsappText } from '#Platforms/Whatsapp/index.js';
 
@@ -34,7 +35,7 @@ const handler = async (ctx: ToolContext, raw: unknown) => {
     }
 
     if (chat?.paused_at) {
-        console.log(`[send_message] ${ctx.phone} paused, nothing sent`);
+        Logger.log(`[send_message] ${ctx.phone} paused, nothing sent`);
         return { ok: false, error: 'chat_paused', instruction: PAUSED_INSTRUCTION };
     }
 
@@ -49,7 +50,7 @@ export const sendMessages = async (ctx: ToolContext, texts: string[]) => {
         for (const text of prepared) {
             const waMessageId = await sendWhatsappText(ctx.phone, text);
             sent.push({ waMessageId, text });
-            console.log(`[send_message] ${ctx.phone} sent: ${text}`);
+            Logger.log(`[send_message] ${ctx.phone} sent: ${text}`);
         }
 
         const now = new Date();
@@ -83,7 +84,7 @@ export const sendMessages = async (ctx: ToolContext, texts: string[]) => {
     // Дебаг режим (без реальных сообщений)
     for (const text of prepared) {
         ctx.replies.push(text);
-        console.log(`[send_message:off] ${ctx.phone}: ${text}`);
+        Logger.log(`[send_message:off] ${ctx.phone}: ${text}`);
     }
 
     return { ok: true, sent: prepared.length };

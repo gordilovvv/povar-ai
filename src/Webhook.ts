@@ -15,6 +15,7 @@ import {
 } from '#Db/WaMessages.js';
 import { env } from '#environment.js';
 import { toDateTime } from '#Lib/Fmt.js';
+import { Logger } from '#Lib/Logger.js';
 import { payloadSchema } from '#Platforms/Whatsapp/Parse.js';
 import { verifySignature } from '#Platforms/Whatsapp/Signature.js';
 
@@ -36,13 +37,13 @@ const handleWebhook: RequestHandler = async (request) => {
     try {
         body = JSON.parse(raw);
     } catch {
-        console.error(`Failed to parse body: ${raw}`);
+        Logger.logError(`Failed to parse body: ${raw}`);
         return status(200);
     }
 
     const parsed = payloadSchema.safeParse(body);
     if (!parsed.success) {
-        console.error('webhook payload parse failed', parsed.error);
+        Logger.logError('webhook payload parse failed', parsed.error);
         return status(200);
     }
 
@@ -107,7 +108,7 @@ const handleWebhook: RequestHandler = async (request) => {
 
         return status(200);
     } catch (error) {
-        console.error(error);
+        Logger.logError('webhook handler failed', error);
         return status(500);
     } finally {
         client.release();

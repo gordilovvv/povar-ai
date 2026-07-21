@@ -7,6 +7,7 @@ import {
 } from '#Db/WaMessages.js';
 import { Agent } from '#Intelligence/Agent.js';
 import { toDateTime } from '#Lib/Fmt.js';
+import { Logger } from '#Lib/Logger.js';
 import { sleep } from '#Lib/Sleep.js';
 
 const CHATS_LIMIT = 3;
@@ -38,7 +39,7 @@ const run = async () => {
                 await Promise.all([...chats].map(([phone, ids]) => handleChat(phone, ids)));
             }
         } catch (error) {
-            console.error('worker loop failed', error);
+            Logger.logError('worker loop failed', error);
         }
         await sleep(POLL_INTERVAL_MS);
     }
@@ -50,7 +51,7 @@ const handleChat = async (phone: string, messageIds: string[]) => {
     try {
         await new Agent(phone).do();
     } catch (error) {
-        console.error(`[worker] chat ${phone} failed`, error);
+        Logger.logError(`[worker] chat ${phone} failed`, error);
         workerStatus = 'failed';
     }
 
@@ -76,16 +77,16 @@ const cleanChatMessagesStatus = async (
         } finally {
             client.release();
         }
-        console.log(`[worker] chat ${phone}: ${messageIds.length} msg → ${workerStatus}`);
+        Logger.log(`[worker] chat ${phone}: ${messageIds.length} msg → ${workerStatus}`);
     } catch (error) {
         if (attempt >= CLEAN_STATUS_RETRIES) {
-            console.error(
+            Logger.logError(
                 `[worker] chat ${phone} clean status exhausted, left in processing`,
                 error,
             );
             return;
         }
-        console.error(`[worker] chat ${phone} clean status attempt ${attempt} failed`, error);
+        Logger.logError(`[worker] chat ${phone} clean status attempt ${attempt} failed`, error);
         await sleep(timeout);
         const nextTimeout = Math.min(timeout * 2, CLEAN_STATUS_RETRY_MAX_MS);
         return cleanChatMessagesStatus(phone, messageIds, workerStatus, attempt + 1, nextTimeout);

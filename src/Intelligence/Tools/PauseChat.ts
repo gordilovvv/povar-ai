@@ -6,6 +6,7 @@ import { env } from '#environment.js';
 import { sendMessages } from '#Intelligence/Tools/SendMessage.js';
 import { badInput } from '#Intelligence/Tools/Utils.js';
 import { type Lang, langSchema } from '#Lib/Lang.js';
+import { Logger } from '#Lib/Logger.js';
 import type { AgentTool, ToolContext } from '#Lib/Tools.js';
 
 const name = 'pause_chat';
@@ -55,11 +56,11 @@ const handler = async (ctx: ToolContext, raw: unknown) => {
     }
 
     if (!paused) {
-        console.log(`[pause_chat] ${ctx.phone} already paused, ignored: ${parsed.data.details}`);
+        Logger.log(`[pause_chat] ${ctx.phone} already paused, ignored: ${parsed.data.details}`);
         return RES;
     }
 
-    console.log(`[pause_chat] ${ctx.phone} paused: ${parsed.data.details}`);
+    Logger.logWarn(`[pause_chat] ${ctx.phone} paused: ${parsed.data.details}`);
 
     // Отправить сообщение по шаблону
     if (env.TEXT_AFTER_PAUSE_CHAT === 'on') {

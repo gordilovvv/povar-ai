@@ -13,6 +13,7 @@ import { sendMessages } from '#Intelligence/Tools/SendMessage.js';
 import { badInput } from '#Intelligence/Tools/Utils.js';
 import { toDateTime } from '#Lib/Fmt.js';
 import type { Lang } from '#Lib/Lang.js';
+import { Logger } from '#Lib/Logger.js';
 import type { AgentTool, ToolContext } from '#Lib/Tools.js';
 
 const name = 'save_guest';
@@ -67,7 +68,7 @@ const handler = async (ctx: ToolContext, raw: unknown) => {
     let answered = false;
     try {
         if ((await ensureGuestlistEntry(client, party_id, ctx.guestId, now)) === 'unknown_party') {
-            console.log(`[save_guest] ${ctx.phone} unknown party_id ${party_id}`);
+            Logger.log(`[save_guest] ${ctx.phone} unknown party_id ${party_id}`);
             return UNKNOWN_PARTY;
         }
         if (friends) {
@@ -92,14 +93,14 @@ const handler = async (ctx: ToolContext, raw: unknown) => {
         client.release();
     }
 
-    console.log(`[save_guest] ${ctx.phone} on ${party_id}, table: ${want_table ?? 'not asked'}`);
+    Logger.log(`[save_guest] ${ctx.phone} on ${party_id}, table: ${want_table ?? 'not asked'}`);
 
     if (want_table === undefined) {
         return { ok: true, status: 'saved' };
     }
 
     if (!answered) {
-        console.log(`[save_guest] ${ctx.phone} on ${party_id} already answered about the table`);
+        Logger.log(`[save_guest] ${ctx.phone} on ${party_id} already answered about the table`);
     }
 
     if (!want_table) {

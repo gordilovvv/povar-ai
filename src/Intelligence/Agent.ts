@@ -7,6 +7,7 @@ import { type ChatContext, Context } from '#Intelligence/Context.js';
 import { Prompts } from '#Intelligence/Prompts.js';
 import sendMessage from '#Intelligence/Tools/SendMessage.js';
 import { Tools } from '#Intelligence/Tools.js';
+import { Logger } from '#Lib/Logger.js';
 import type { ToolContext } from '#Lib/Tools.js';
 import { sendTypingIndicator } from '#Platforms/Whatsapp/index.js';
 
@@ -47,7 +48,7 @@ export class Agent {
         const { guest, chat, messages: history } = context.context;
 
         if (chat?.paused_at) {
-            console.log(`[agent] ${this.phone} chat is paused, turn skipped`);
+            Logger.log(`[agent] ${this.phone} chat is paused, turn skipped`);
             return [];
         }
 
@@ -58,7 +59,7 @@ export class Agent {
             const waId = history.findLast((message) => message.owner === 'guest')?.wa_message_id;
             if (waId) {
                 void sendTypingIndicator(waId).catch((error) =>
-                    console.error(`[agent] ${this.phone} typing indicator failed`, error),
+                    Logger.logError(`[agent] ${this.phone} typing indicator failed`, error),
                 );
             }
         }
@@ -98,7 +99,7 @@ export class Agent {
             usage.cacheWrite += response.usage.cache_creation_input_tokens ?? 0;
 
             const toolUses = response.content.filter((block) => block.type === 'tool_use');
-            console.log(
+            Logger.debug(
                 `[agent] ${this.phone} step ${step} stop=${response.stop_reason} tools=${toolUses.map((tool) => tool.name).join(',') || '-'} in=${response.usage.input_tokens} out=${response.usage.output_tokens}`,
             );
 
@@ -107,7 +108,7 @@ export class Agent {
                 for (const toolUse of toolUses) {
                     const output = await Agent.tools.run(toolUse.name, toolUse.input, ctx);
                     replyForbidden ||= Agent.REPLY_FORBIDDEN.safeParse(output).success;
-                    console.log(
+                    Logger.log(
                         `[agent] ${this.phone} tool ${toolUse.name} → ${JSON.stringify(output)}`,
                     );
                     results.push({
@@ -124,7 +125,7 @@ export class Agent {
 
             // ответ обрезан на полуслове — дослать его гостю хуже, чем промолчать
             if (response.stop_reason === 'max_tokens') {
-                console.error(`[agent] ${this.phone} step ${step} hit max_tokens, reply dropped`);
+                Logger.logError(`[agent] ${this.phone} step ${step} hit max_tokens, reply dropped`);
                 break;
             }
 
@@ -153,11 +154,11 @@ export class Agent {
         }
 
         if (!ctx.replies.length && !replyForbidden) {
-            console.error(`[agent] ${this.phone} turn ended with no reply after ${steps} steps`);
+            Logger.logError(`[agent] ${this.phone} turn ended with no reply after ${steps} steps`);
         }
 
         const [seconds, nanos] = process.hrtime(startedAt);
-        console.log(
+        Logger.debug(
             `[agent] ${this.phone} turn done: ${steps} steps, ${ctx.replies.length} replies, ${seconds}s ${Math.round(nanos / 1e6)}ms, tokens in=${usage.input} cacheR=${usage.cacheRead} cacheW=${usage.cacheWrite} out=${usage.output}`,
         );
     }
