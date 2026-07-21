@@ -1,9 +1,12 @@
 create table party (
     id text primary key,
+    type text not null, -- owned | invited
     name text not null,
+    price numeric,
     location text not null,
     google_map_link text,
-    price numeric
+    reels_url text,
+    notes text
 );
 
 create table party_ads (
@@ -29,7 +32,8 @@ create table guests (
     wa_phone text unique,
     first_name text,
     last_name text,
-    instagram_url text,
+    instagram text,
+    instagram_asked_at timestamp with time zone,
     came_from text, -- ad | manual
     came_at timestamp with time zone,
     lang text
@@ -43,7 +47,10 @@ create table party_guestlist (
     visited_party boolean,
     booked_table boolean,
     booked_table_paid boolean,
-    joined_at timestamp with time zone
+    joined_at timestamp with time zone,
+    friends text[], -- имя + фамилия одной строкой на друга
+    table_offered_at timestamp with time zone,
+    telegram_alert_at timestamp with time zone
 );
 
 -- WhatsApp
@@ -51,7 +58,9 @@ create table wa_chats (
     wa_phone text primary key,
     guest_id text,
     last_sent_message_at timestamp with time zone,
-    last_received_message_at timestamp with time zone
+    last_received_message_at timestamp with time zone,
+    paused_at timestamp with time zone,
+    pause_details text
 );
 
 create table wa_messages (
@@ -61,7 +70,7 @@ create table wa_messages (
     text text,
     owner text not null, -- ai | guest | marketing | sema
     status text, -- idle | sent | delivered | read | failed
-    worker_status text, -- need_processed | processing | processed | failed
+    worker_status text, -- need_processed | processing | processed | failed | skipped
     concurrency_version integer not null default 0,
     sent_at timestamp with time zone
 );
@@ -72,3 +81,10 @@ create index if not exists wa_messages_claim
 
 create index if not exists wa_messages_chat_history
     on wa_messages (wa_chat_phone, id desc);
+
+-- Dashboard
+create table dashboard_users (
+    id text primary key,
+    phone_number text not null unique,
+    created_at timestamp with time zone
+);

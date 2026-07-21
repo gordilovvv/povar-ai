@@ -13,7 +13,7 @@ export interface GuestStorage {
     came_from: GuestCameFrom | null;
     came_at: string | null;
     lang: GuestLang | null;
-    insta_asked_at: string | null;
+    instagram_asked_at: string | null;
 }
 
 export const selectGuestByPhone = async (client: PoolClient, waPhone: string) => {
@@ -53,7 +53,7 @@ export const updateGuestProfile = async (
         first_name?: string | undefined;
         last_name?: string | undefined;
         instagram?: string | undefined;
-        insta_asked_at?: string | undefined;
+        instagram_asked_at?: string | undefined;
     },
 ) => {
     const result = await client.query<GuestStorage>(
@@ -62,13 +62,13 @@ export const updateGuestProfile = async (
                 first_name = coalesce(%L, first_name),
                 last_name = coalesce(%L, last_name),
                 instagram = coalesce(%L, instagram),
-                insta_asked_at = coalesce(%L, insta_asked_at)
+                instagram_asked_at = coalesce(%L, instagram_asked_at)
             where id = %L
             returning *`,
             patch.first_name ?? null,
             patch.last_name ?? null,
             patch.instagram ?? null,
-            patch.insta_asked_at ?? null,
+            patch.instagram_asked_at ?? null,
             id,
         ),
     );

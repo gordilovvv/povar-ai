@@ -1,6 +1,11 @@
 import type { PoolClient } from 'pg';
 import format from 'pg-format';
+import { z } from 'zod';
 import { env } from '#environment.js';
+
+export const partyTypeSchema = z.enum(['owned', 'invited']);
+
+type PartyType = z.infer<typeof partyTypeSchema>;
 
 export interface PartyStorage {
     id: string;
@@ -10,6 +15,7 @@ export interface PartyStorage {
     price: string | null;
     reels_url: string | null;
     notes: string | null;
+    type: PartyType;
 }
 
 export interface PartyTablesStorage {
