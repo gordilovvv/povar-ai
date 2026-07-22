@@ -11,6 +11,7 @@ import {
 import { env } from '#environment.js';
 import { Agent, type ChatContext } from '#Intelligence/Agent.js';
 import { startGuestlistJob } from '#Jobs/Guestlist.js';
+import { startPauseAlertJob } from '#Jobs/PauseAlert.js';
 import { toDateTime } from '#Lib/Fmt.js';
 import { parseLanguage } from '#Lib/Lang.js';
 import { sleep } from '#Lib/Sleep.js';
@@ -159,6 +160,7 @@ try {
 running = true;
 void run();
 startGuestlistJob();
+startPauseAlertJob();
 
 process.on('SIGTERM', () => {
     running = false;

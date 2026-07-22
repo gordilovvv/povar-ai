@@ -28,6 +28,7 @@
     "cyrillic-to-translit-js": "^3.2.1",
     "dayjs": "^1.11.21",
     "itty-router": "^5.0.22",
+    "libphonenumber-js": "^1.13.9",
     "pg": "^8.16.3",
     "pg-format": "^1.0.4",
     "pino": "^9.9.5",

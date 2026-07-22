@@ -134,6 +134,7 @@ export const selectChatsList = async (
     client: PoolClient,
     cursor: ChatsCursor | null,
     limit: number,
+    phone: string | null = null,
 ) => {
     const result = await client.query<ChatListRow>(
         format(
@@ -159,11 +160,14 @@ export const selectChatsList = async (
             )
             select wa_phone, first_name, last_name, last_message_at, sort_at, last_message_text, paused
             from base
-            where %L::timestamptz is null
-                or sort_at < %L::timestamptz
-                or (sort_at = %L::timestamptz and wa_phone < %L)
+            where (%L::text is null or wa_phone like %L)
+                and (%L::timestamptz is null
+                    or sort_at < %L::timestamptz
+                    or (sort_at = %L::timestamptz and wa_phone < %L))
             order by sort_at desc, wa_phone desc
             limit %L`,
+            phone !== null ? `%${phone}%` : null,
+            phone !== null ? `%${phone}%` : null,
             cursor?.last_message_at ?? null,
             cursor?.last_message_at ?? null,
             cursor?.last_message_at ?? null,

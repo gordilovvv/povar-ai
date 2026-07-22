@@ -23,6 +23,9 @@ importers:
       itty-router:
         specifier: ^5.0.22
         version: 5.0.24
+      libphonenumber-js:
+        specifier: ^1.13.9
+        version: 1.13.9
       pg:
         specifier: ^8.16.3
         version: 8.22.0
@@ -503,6 +506,9 @@ packages:
     resolution: {integrity: sha512-+DWg8jCJG2TEnpy7kOm/7/AxaYoaRbjVB4LFZLySZlWn8exGs3A4OLJR966cVvU26N7X9TWxl+Jsw7dzAqKT6g==}
     engines: {node: '>=16'}
 
+  libphonenumber-js@1.13.9:
+    resolution: {integrity: sha512-VNS5vWMM7r0P66BYv+TQJATxExEgLxN+34hfHDVhDkUsGAE4cRg0shCNSLTXNKm7nIUscC7AfB51TjxEeF7msQ==}
+
   lodash.invert@4.3.0:
     resolution: {integrity: sha512-3CJmOxN5y47rd+g5XjdZNcq2SorJkvlSqBwPomT094p6LZ4p7b5bUoRzYYMjwsTGWTW77z/dFZlCzeVQxBrZVg==}
 
@@ -960,6 +966,8 @@ snapshots:
     dependencies:
       '@babel/runtime': 7.29.7
       ts-algebra: 2.0.0
+
+  libphonenumber-js@1.13.9: {}
 
   lodash.invert@4.3.0: {}
 
