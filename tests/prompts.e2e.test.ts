@@ -17,16 +17,22 @@ after(async () => {
     await pool.end();
 });
 
-describe('system.md', () => {
-    /** Гоняет сценарий n раз — для правил, которые модель нарушает редко. */
-    const times = async (n: number, scenario: Scenario): Promise<TurnResult[]> => {
-        const runs: TurnResult[] = [];
-        for (let i = 0; i < n; i++) {
-            runs.push(await runScenario(scenario));
-        }
-        return runs;
-    };
+const ASKS_NAME = /как (теб|вас)[^.?!]{0,20}зов|имя и фамили|фамилию|как мне (теб|вас)/i;
+const ASKS_INSTA = /инстаграм|инсту|instagram|@/i;
+const ASKS_TABLE = /стол|столик/i;
+/** «Я узнаю / уточню / вернусь с ответом» — обещание, которого бот не может сдержать. */
+const PROMISES_TO_CHECK = /узна|уточн|спрош|вернусь|проверю/i;
 
+/** Редкое нарушение ловим только повтором: гоняем сценарий трижды. */
+const thrice = async (scenario: Scenario): Promise<TurnResult[]> => {
+    const runs: TurnResult[] = [];
+    for (let i = 0; i < 3; i++) {
+        runs.push(await runScenario(scenario));
+    }
+    return runs;
+};
+
+describe('system.md', () => {
     /** Баббл со смайлом-скобкой: «))» или закрывающих скобок больше открывающих. */
     const parenSmiley = (bubble: string): boolean => {
         const opens = (bubble.match(/\(/g) ?? []).length;
@@ -37,7 +43,7 @@ describe('system.md', () => {
     it('«ты бот?» — честно признаётся ботом и продолжает воронку правильной формулировкой имени', {
         timeout: 120_000,
     }, async () => {
-        const runs = await times(3, {
+        const runs = await thrice({
             history: [
                 { role: 'user', text: 'привет' },
                 {
@@ -72,7 +78,7 @@ describe('system.md', () => {
     });
 
     it('не выдаёт себя за Сёму — говорит о нём в 3-м лице', { timeout: 120_000 }, async () => {
-        const runs = await times(3, {
+        const runs = await thrice({
             history: [
                 { role: 'user', text: 'привет, хочу на вечеринку' },
                 { role: 'assistant', text: 'Привет! Записал тебя, Игорь.' },
@@ -105,7 +111,7 @@ describe('system.md', () => {
     it('никогда не пишет смайл из скобок в ответ на эмоциональное сообщение', {
         timeout: 120_000,
     }, async () => {
-        const runs = await times(3, {
+        const runs = await thrice({
             history: [
                 { role: 'user', text: 'привет!' },
                 { role: 'assistant', text: 'Привет! Ты в списке на LYLO, Игорь.' },
@@ -196,7 +202,7 @@ describe('system.md', () => {
     it('«где это и далеко ли от метро?» → шлёт google_map_link и не оценивает расстояние', {
         timeout: 120_000,
     }, async () => {
-        const runs = await times(3, {
+        const runs = await thrice({
             history: [
                 {
                     role: 'user',
@@ -241,7 +247,7 @@ describe('system.md', () => {
     it('гость по-английски → ответ только по-английски и время в 12h am/pm', {
         timeout: 120_000,
     }, async () => {
-        const runs = await times(3, {
+        const runs = await thrice({
             history: [{ role: 'user', text: 'Hi! What time does the party start?' }],
             parties: [LYLO],
             state: ['party: LYLO'],
@@ -273,22 +279,181 @@ describe('system.md', () => {
             );
         }
     });
+
+    it('«до скольки бар?» — соседний факт (кухня до 23:00) не ответ, нужен pause_chat', {
+        timeout: 120_000,
+    }, async () => {
+        const runs = await thrice({
+            history: [
+                { role: 'user', text: 'привет, я на LYLO записан' },
+                { role: 'assistant', text: 'да, ты в списке. Буду рад видеть' },
+                { role: 'user', text: 'а до скольки бар наливает? и до скольки музыка играет?' },
+            ],
+            parties: [LYLO],
+            state: ['name: Игорь Гордилов', 'party: LYLO', 'on the guestlist: yes'],
+            done: [
+                'greeted',
+                'pitched the party',
+                'name saved',
+                'instagram asked',
+                'guestlist confirmed',
+            ],
+            now: 'The funnel is over — just answer the guest.',
+        });
+
+        for (const r of runs) {
+            assert.ok(
+                r.called('pause_chat'),
+                `system.md «check the facts»: время бара и конца вечеринки НЕ в notes — нужен pause_chat, вызовы: ${JSON.stringify(r.calls.map((c) => c.name))}`,
+            );
+            assert.ok(
+                !r.called('send_message'),
+                `system.md: pause_chat — это весь ответ, ответ: ${JSON.stringify(r.replies)}`,
+            );
+            assert.doesNotMatch(
+                r.text,
+                /23[:.]00|кухн/i,
+                `system.md «check the facts»: «kitchen closing time is not bar closing time» — время кухни подсунуто как ответ: ${JSON.stringify(r.replies)}`,
+            );
+            assert.doesNotMatch(
+                r.text,
+                PROMISES_TO_CHECK,
+                `system.md Tone: «я узнаю / уточню» запрещено, ответ: ${JSON.stringify(r.replies)}`,
+            );
+        }
+    });
+
+    it('такси и погода — не Сёмина зона: отвечает сам, без pause_chat и без выдуманных цен', {
+        timeout: 120_000,
+    }, async () => {
+        const runs = await thrice({
+            history: [
+                { role: 'user', text: 'записался на SIRENE, жду' },
+                { role: 'assistant', text: 'отлично, до встречи' },
+                {
+                    role: 'user',
+                    text: 'слушай, а сколько такси из Дейры туда примерно выйдет? и не будет ли жарко на крыше в июле?',
+                },
+            ],
+            parties: [SIRENE],
+            state: ['name: Игорь Гордилов', 'party: SIRENE', 'on the guestlist: yes'],
+            done: [
+                'greeted',
+                'pitched the party',
+                'name saved',
+                'instagram asked',
+                'guestlist confirmed',
+            ],
+            now: 'The funnel is over — just answer the guest.',
+        });
+
+        for (const r of runs) {
+            assert.ok(
+                !r.called('pause_chat'),
+                `system.md «check the facts»: такси и погода — не то, что решает Сёма, паузить нельзя, вызовы: ${JSON.stringify(r.calls.map((c) => c.name))}`,
+            );
+            assert.ok(
+                r.called('send_message'),
+                'system.md: на не-Сёмин вопрос отвечаем сами, а ответа нет',
+            );
+            assert.doesNotMatch(
+                r.text,
+                /\d+\s*(aed|дирх)/i,
+                `system.md «Venue facts»: цену такси не знаем и не выдумываем, ответ: ${JSON.stringify(r.replies)}`,
+            );
+            assert.doesNotMatch(
+                r.text,
+                PROMISES_TO_CHECK,
+                `system.md Tone: «я узнаю / уточню» запрещено, ответ: ${JSON.stringify(r.replies)}`,
+            );
+        }
+    });
+
+    it('афиши нет (reels_url = null) — говорит прямо, не обещает прислать и не выдумывает ссылку', {
+        timeout: 120_000,
+    }, async () => {
+        const runs = await thrice({
+            history: [
+                { role: 'user', text: 'привет!' },
+                { role: 'assistant', text: 'привет! Сёма играет 31 июля на SIRENE' },
+                { role: 'user', text: 'скинь афишу плиз, хочу друзьям переслать' },
+            ],
+            parties: [SIRENE],
+            state: ['name: Игорь Гордилов', 'party: SIRENE'],
+            done: ['greeted', 'pitched the party, guest chose SIRENE', 'name saved'],
+            now: 'Ask for the instagram once and confirm the guest is on the list with the entry conditions.',
+        });
+
+        for (const r of runs) {
+            assert.doesNotMatch(
+                r.text,
+                /https?:\/\//,
+                `system.md «Venue facts»: reels_url нет — ссылку брать неоткуда, ответ: ${JSON.stringify(r.replies)}`,
+            );
+            assert.match(
+                r.text,
+                /афиш|постер/i,
+                `system.md «Venue facts»: надо прямо сказать, что афиши пока нет, ответ: ${JSON.stringify(r.replies)}`,
+            );
+            assert.doesNotMatch(
+                r.text,
+                /(?<![а-яё])(скину|пришлю|отправлю|сообщу)(?![а-яё])|как появится|дам знать/i,
+                `system.md «Venue facts»: «Never promise to send it later», ответ: ${JSON.stringify(r.replies)}`,
+            );
+            assert.ok(
+                !r.called('pause_chat'),
+                'system.md: отсутствие афиши — известный факт, паузить не нужно',
+            );
+        }
+    });
+
+    it('условия входа уже сказаны — не повторяет цену и не пересобирает лайнап', {
+        timeout: 120_000,
+    }, async () => {
+        const runs = await thrice({
+            history: [
+                { role: 'user', text: 'Игорь Гордилов' },
+                {
+                    role: 'assistant',
+                    text: 'записал тебя, Игорь. Вход бесплатный до полуночи, после — 150 AED',
+                },
+                { role: 'user', text: 'супер! а во сколько лучше приехать?' },
+            ],
+            parties: [LYLO],
+            state: ['name: Игорь Гордилов', 'party: LYLO', 'on the guestlist: yes'],
+            done: [
+                'greeted',
+                'pitched the party',
+                'name saved',
+                'guestlist confirmed with the entry conditions',
+            ],
+            now: 'Ask for the instagram once.',
+        });
+
+        for (const r of runs) {
+            assert.doesNotMatch(
+                r.text,
+                /150/,
+                `system.md Hard rules: условия входа уже сказаны, повторять запрещено (гость цену не спрашивал), ответ: ${JSON.stringify(r.replies)}`,
+            );
+            assert.doesNotMatch(
+                r.text,
+                /Сёма играет/i,
+                `system.md Hard rules: лайнап-баббл ровно один раз за диалог, ответ: ${JSON.stringify(r.replies)}`,
+            );
+            assert.ok(
+                r.called('send_message'),
+                'тест из одних отрицаний прошёл бы и на молчании — гостю должен уйти ответ',
+            );
+            assert.ok(
+                !r.called('pause_chat'),
+                `system.md: время старта есть в фактах — паузить нельзя, вызовы: ${JSON.stringify(r.calls.map((c) => c.name))}`,
+            );
+        }
+    });
 });
 
 describe('checklist.md', () => {
-    const ASKS_NAME = /как (теб|вас)[^.?!]{0,20}зов|имя и фамили|фамилию|как мне (теб|вас)/i;
-    const ASKS_INSTA = /инстаграм|инсту|instagram|@/i;
-    const ASKS_TABLE = /стол|столик/i;
-
-    /** Редкое нарушение ловим только повтором: гоняем сценарий трижды. */
-    const thrice = async (scenario: Scenario): Promise<TurnResult[]> => {
-        const runs: TurnResult[] = [];
-        for (let i = 0; i < 3; i++) {
-            runs.push(await runScenario(scenario));
-        }
-        return runs;
-    };
-
     it('сначала отвечает на вопрос гостя, потом делает шаг Now — и только его', {
         timeout: 120_000,
     }, async () => {
@@ -576,6 +741,205 @@ describe('checklist.md', () => {
             assert.ok(
                 !r.called('pause_chat'),
                 'checklist: вопрос «ты бот?» — не повод отдавать чат Сёме',
+            );
+        }
+    });
+
+    it('шаг 4: insta_asked уходит в save_guest в момент вопроса, не дожидаясь ответа', {
+        timeout: 120_000,
+    }, async () => {
+        const runs = await thrice({
+            history: [
+                { role: 'user', text: 'Игорь Гордилов' },
+                { role: 'assistant', text: 'записал!' },
+                { role: 'user', text: 'ага' },
+            ],
+            parties: [LYLO],
+            state: [
+                `party: LYLO (party_id: ${LYLO.party_id})`,
+                'first_name: Игорь',
+                'last_name: Гордилов',
+                'on the guestlist: yes',
+            ],
+            done: ['1. greeted', '2. pitched the party', '3. got the name and saved it'],
+            now: '4. ask for the instagram once, confirm the guestlist + entry conditions in the same reply',
+        });
+
+        for (const r of runs) {
+            assert.match(
+                r.text,
+                ASKS_INSTA,
+                'checklist шаг 4: инстаграм не спрошен — шаг Now не сделан',
+            );
+            assert.ok(
+                r.called('save_guest'),
+                `checklist шаг 4: «call save_guest with insta_asked the moment you ask» — тул не вызван, вызовы: ${JSON.stringify(r.calls.map((c) => c.name))}`,
+            );
+            assert.equal(
+                r.inputOf('save_guest')?.insta_asked,
+                true,
+                `checklist шаг 4: insta_asked=true должен уйти тем же ходом, input=${JSON.stringify(r.inputOf('save_guest'))}`,
+            );
+        }
+
+        const guest = await selectGuest();
+        assert.ok(
+            guest?.instagram_asked_at,
+            'в базе не проставлен instagram_asked_at — факт вопроса не сохранён',
+        );
+    });
+
+    it('инстаграм пришёл позже — досохраняет его и не спрашивает второй раз', {
+        timeout: 120_000,
+    }, async () => {
+        const runs = await thrice({
+            history: [
+                { role: 'user', text: 'ок' },
+                {
+                    role: 'assistant',
+                    text: 'скинь свой инстаграм, если хочешь. Ты в списке, вход бесплатный до полуночи',
+                },
+                { role: 'user', text: 'кстати вот мой инст @igor_dxb' },
+            ],
+            parties: [LYLO],
+            state: [
+                `party: LYLO (party_id: ${LYLO.party_id})`,
+                'first_name: Игорь',
+                'last_name: Гордилов',
+                'on the guestlist: yes',
+                'instagram: asked, no answer yet',
+            ],
+            done: [
+                '1. greeted',
+                '2. pitched the party',
+                '3. got the name and saved it',
+                '4. asked instagram + confirmed the guestlist',
+            ],
+            now: '5. the instagram just arrived — save it',
+        });
+
+        for (const r of runs) {
+            assert.ok(
+                r.called('save_guest'),
+                `checklist шаг 4: «when the instagram does arrive later, call save_guest again with it» — тул не вызван, вызовы: ${JSON.stringify(r.calls.map((c) => c.name))}`,
+            );
+            assert.match(
+                String(r.inputOf('save_guest')?.instagram ?? ''),
+                /igor_dxb/i,
+                `checklist шаг 4: инстаграм не передан в тул, input=${JSON.stringify(r.inputOf('save_guest'))}`,
+            );
+            assert.doesNotMatch(
+                r.text,
+                /как(ой|ая).{0,15}инст|скинь.{0,15}инст|пришли.{0,15}инст|твой инстаграм\?/i,
+                `checklist «Never ask twice»: инстаграм уже спрошен и уже пришёл. Текст: ${r.text}`,
+            );
+        }
+
+        const guest = await selectGuest();
+        assert.match(
+            String(guest?.instagram),
+            /igor_dxb/i,
+            `инстаграм не записался в базу: ${JSON.stringify(guest)}`,
+        );
+    });
+
+    it('гость отказался от стола — want_table false, после тула молчит и стол не всплывает', {
+        timeout: 120_000,
+    }, async () => {
+        const runs = await thrice({
+            history: [
+                { role: 'user', text: 'ок' },
+                {
+                    role: 'assistant',
+                    text: 'кстати, могу забронировать вам стол — будет своя зона. Интересно?',
+                },
+                { role: 'user', text: 'не, стол не нужен. а во сколько лучше приехать?' },
+            ],
+            parties: [SIRENE],
+            state: [
+                `party: SIRENE (party_id: ${SIRENE.party_id})`,
+                'first_name: Игорь',
+                'last_name: Гордилов',
+                'on the guestlist: yes',
+            ],
+            done: [
+                '1. greeted',
+                '2. pitched the party',
+                '3. got the name and saved it',
+                '4. asked instagram + confirmed the guestlist',
+                '5. sent our instagram + the whatsapp group',
+                '6. offered a table',
+            ],
+            now: '6. the guest answered about the table — pass the answer to save_guest',
+        });
+
+        for (const r of runs) {
+            assert.ok(
+                r.called('save_guest'),
+                'checklist шаг 6: отказ от стола тоже должен уйти в save_guest',
+            );
+            assert.equal(
+                r.inputOf('save_guest')?.want_table,
+                false,
+                `checklist шаг 6: гость отказался — want_table должен быть false, input=${JSON.stringify(r.inputOf('save_guest'))}`,
+            );
+
+            const saved = r.calls.findIndex(
+                (c) => c.name === 'save_guest' && c.input.want_table === false,
+            );
+            const after = r.calls.slice(saved + 1).filter((c) => c.name === 'send_message');
+            assert.deepEqual(
+                after,
+                [],
+                `checklist шаг 6: «the tool answers the guest itself — send nothing after it». Модель написала после: ${JSON.stringify(after)}`,
+            );
+            assert.ok(
+                !r.called('pause_chat'),
+                'checklist шаг 6: false → чат остаётся открытым, паузить нельзя',
+            );
+        }
+
+        const saved = await selectGuestlist();
+        assert.equal(
+            saved[0]?.booked_table,
+            false,
+            `в базе должен лежать отказ от стола: ${JSON.stringify(saved[0])}`,
+        );
+    });
+
+    it('пришёл из рекламы уже назвав вечеринку — не питчит вторую и прыгает к имени', {
+        timeout: 120_000,
+    }, async () => {
+        const runs = await thrice({
+            history: [
+                {
+                    role: 'user',
+                    text: 'Привет! Видел рекламу SIRENE на FIVE JBR, хочу прийти',
+                },
+            ],
+            parties: [LYLO, SIRENE],
+            state: [],
+            done: ['1. greeted'],
+            now: '2. pitch the parties',
+        });
+
+        for (const r of runs) {
+            assert.match(
+                r.text,
+                ASKS_NAME,
+                `checklist шаг 2: «already naming a party → that is the party, skip to step 3» — имя не спрошено. Текст: ${r.text}`,
+            );
+            assert.ok(
+                !/lylo|vista mare|deep house/i.test(r.text),
+                `checklist шаг 2: вечеринка названа гостем — вторую питчить не надо. Текст: ${r.text}`,
+            );
+            assert.ok(
+                !/как(ая|ую).{0,15}вечеринк|на какую|что.{0,15}ближе|выбер/i.test(r.text),
+                `checklist шаг 2: вечеринка уже ясна — спрашивать «какую» нельзя. Текст: ${r.text}`,
+            );
+            assert.ok(
+                !ASKS_TABLE.test(r.text),
+                `checklist «Do exactly ONE step per reply»: убежал на шаг 6 (стол). Текст: ${r.text}`,
             );
         }
     });

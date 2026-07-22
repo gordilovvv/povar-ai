@@ -2,12 +2,15 @@ import type { IRequest, RequestHandler } from 'itty-router';
 import { type GuestlistRow, selectPartyGuestlist } from '#Dashboard/Db/Parties.js';
 import { pool } from '#Dashboard/Db/Pool.js';
 import { badRequest, success } from '#Dashboard/Lib/Response.js';
-import { safeParseString } from '#Lib/Fmt.js';
+import { fromDateTime, safeParseString } from '#Lib/Fmt.js';
 
 interface GuestlistItem {
     firstName: string | null;
     lastName: string | null;
     instagram: string | null;
+    friends: string[];
+    joinedAt: string | null;
+    tableOfferedAt: string | null;
 }
 
 export const partyGetGuestlistListHandler: RequestHandler<IRequest> = async (request) => {
@@ -30,6 +33,9 @@ export const partyGetGuestlistListHandler: RequestHandler<IRequest> = async (req
             firstName: row.first_name,
             lastName: row.last_name,
             instagram: row.instagram,
+            friends: row.friends ?? [],
+            joinedAt: fromDateTime(row.joined_at),
+            tableOfferedAt: fromDateTime(row.table_offered_at),
         });
     }
 

@@ -15,7 +15,7 @@ import { verifyJwt } from '#Dashboard/Lib/Jwt.js';
 import { dashboardFetch } from '#Dashboard/Router.js';
 import { measure } from './helpers/e2e.ts';
 
-const DEV_PASSWORD = 'dev-admin-Pass_2026';
+const DEV_PASSWORD = 'SemaAI2026@';
 const ADMIN_PHONE = process.env.ADMIN_PHONE ?? '';
 const JWT_SECRET = process.env.JWT_SECRET ?? '';
 const ACCESS_TTL_SEC = 15 * 60;

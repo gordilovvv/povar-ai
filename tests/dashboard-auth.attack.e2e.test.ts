@@ -10,7 +10,7 @@ import { pool as dashboardPool } from '#Dashboard/Db/Pool.js';
 import { signJwt } from '#Dashboard/Lib/Jwt.js';
 import { dashboardFetch } from '#Dashboard/Router.js';
 
-const DEV_PASSWORD = 'dev-admin-Pass_2026';
+const DEV_PASSWORD = 'SemaAI2026@';
 const ADMIN_PHONE = process.env.ADMIN_PHONE ?? '';
 const JWT_SECRET = process.env.JWT_SECRET ?? '';
 

@@ -1,10 +1,10 @@
 // Задача модуля (partiesGetListHandler + partyGetGuestlistListHandler):
 //   вход  → GET /parties?limit&cursor ; GET /parties/:id/guestlist
 //           заголовок authorization: Bearer <access JWT> (гейт withAuthorization)
-//   выход → parties: { id, name, location, startsAt, guestCount }[], nextCursor
+//   выход → parties: { id, type, name, price, location, reelsUrl, notes, startsAt, guestCount }[], nextCursor
 //           сорт: активная (идёт сейчас, ≤ ACTIVE_PARTY_WINDOW_HOURS после старта) →
 //                 будущие (asc) → прошедшие (desc) → без времени (последними)
-//           guestlist: { firstName, lastName, instagram }[] по joined_at asc
+//           guestlist: { firstName, lastName, instagram, friends, joinedAt, tableOfferedAt }[] по joined_at asc
 //   бюджет → сеть/БД жёстко не меряем (ориентир p95 ≤ 150ms), только measure()
 //   негатив → нет/битый токен → 401; пустой id → 400 (в .attack);
 //             несуществующий party в guestlist → 200 []
@@ -60,8 +60,16 @@ async function seed(): Promise<void> {
         for (const party of PARTIES) {
             const id = ID.get(party.key) ?? '';
             await client.query(
-                `insert into party (id, name, location, type) values ($1, $2, $3, 'owned')`,
-                [id, `Party ${party.key}`, `Loc ${party.key}`],
+                `insert into party (id, type, name, price, location, reels_url, notes)
+                 values ($1, 'owned', $2, $3, $4, $5, $6)`,
+                [
+                    id,
+                    `Party ${party.key}`,
+                    party.key === 'ongoing' ? 1500 : null,
+                    `Loc ${party.key}`,
+                    `https://reels/${party.key}`,
+                    `note ${party.key}`,
+                ],
             );
             if (party.offset !== null) {
                 await client.query(
@@ -72,7 +80,10 @@ async function seed(): Promise<void> {
         }
 
         // Гости на активной вечеринке: joined_at по возрастанию → guest0 раньше guest1.
+        // guest0 — с friends и table_offered_at; guest1 — без (проверяем null → [] и null-дату).
         const ongoingId = ID.get('ongoing') ?? '';
+        const FRIENDS = [['Ann Smith', 'Bob Lee'], null];
+        const OFFERED = [toDateTime(new Date(NOW)), null];
         for (let i = 0; i < 2; i++) {
             const guestId = ulid();
             await client.query(
@@ -81,8 +92,9 @@ async function seed(): Promise<void> {
                 [guestId, GUEST_PHONES[i], `First${i}`, `Last${i}`, `https://insta/${i}`],
             );
             await client.query(
-                `insert into party_guestlist (party_id, guest_id, joined_at) values ($1, $2, $3)`,
-                [ongoingId, guestId, toDateTime(new Date(NOW + i * 1000))],
+                `insert into party_guestlist (party_id, guest_id, joined_at, friends, table_offered_at)
+                 values ($1, $2, $3, $4, $5)`,
+                [ongoingId, guestId, toDateTime(new Date(NOW + i * 1000)), FRIENDS[i], OFFERED[i]],
             );
         }
     });
@@ -91,8 +103,12 @@ async function seed(): Promise<void> {
 interface PartiesResponse {
     items: {
         id: string;
+        type: string;
         name: string;
+        price: number | null;
         location: string;
+        reelsUrl: string | null;
+        notes: string | null;
         startsAt: string | null;
         guestCount: number;
     }[];
@@ -103,6 +119,9 @@ type GuestlistResponse = {
     firstName: string | null;
     lastName: string | null;
     instagram: string | null;
+    friends: string[];
+    joinedAt: string | null;
+    tableOfferedAt: string | null;
 }[];
 
 let token = '';
@@ -157,6 +176,18 @@ describe('e2e: dashboard partiesGetList + partyGetGuestlistList', () => {
             'location отдаётся as-is',
         );
 
+        // Новые поля party.
+        const ongoing = byId.get(ID.get('ongoing') ?? '');
+        assert.equal(ongoing?.type, 'owned', 'type отдаётся');
+        assert.equal(ongoing?.price, 1500, 'price → number');
+        assert.equal(ongoing?.reelsUrl, 'https://reels/ongoing', 'reelsUrl отдаётся');
+        assert.equal(ongoing?.notes, 'note ongoing', 'notes отдаётся');
+        assert.equal(
+            byId.get(ID.get('future1') ?? '')?.price,
+            null,
+            'price null → null (не 0/NaN)',
+        );
+
         // Сверка guestCount напрямую с БД.
         const dbRow = await dbOne<{ n: string }>(
             `select count(*)::text as n from party_guestlist where party_id = $1`,
@@ -201,7 +232,7 @@ describe('e2e: dashboard partiesGetList + partyGetGuestlistList', () => {
         assert.deepEqual(mineOrder, EXPECTED_ORDER, 'keyset выдаёт мои вечеринки в верном порядке');
     });
 
-    it('guestlist: { firstName, lastName, instagram }[] по joined_at asc', async () => {
+    it('guestlist: { firstName, lastName, instagram, friends, joinedAt, tableOfferedAt }[] по joined_at asc', async () => {
         const { result } = await measure('GET /parties/:id/guestlist', () =>
             dashboardFetch(
                 new Request(
@@ -215,13 +246,29 @@ describe('e2e: dashboard partiesGetList + partyGetGuestlistList', () => {
         assert.equal(result.status, 200);
         const body = (await result.json()) as GuestlistResponse;
 
+        const joinedAt = (i: number) =>
+            new Date(Math.floor((NOW + i * 1000) / 1000) * 1000).toISOString();
         assert.deepEqual(
             body,
             [
-                { firstName: 'First0', lastName: 'Last0', instagram: 'https://insta/0' },
-                { firstName: 'First1', lastName: 'Last1', instagram: 'https://insta/1' },
+                {
+                    firstName: 'First0',
+                    lastName: 'Last0',
+                    instagram: 'https://insta/0',
+                    friends: ['Ann Smith', 'Bob Lee'],
+                    joinedAt: joinedAt(0),
+                    tableOfferedAt: new Date(Math.floor(NOW / 1000) * 1000).toISOString(),
+                },
+                {
+                    firstName: 'First1',
+                    lastName: 'Last1',
+                    instagram: 'https://insta/1',
+                    friends: [],
+                    joinedAt: joinedAt(1),
+                    tableOfferedAt: null,
+                },
             ],
-            'гости по joined_at asc, instagram из instagram',
+            'гости по joined_at asc: friends (null→[]), joinedAt, tableOfferedAt',
         );
     });
 

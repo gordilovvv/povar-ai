@@ -29,5 +29,7 @@ export const chatGetHandler: RequestHandler<IRequest> = async (request) => {
         lastMessageAt: fromDateTime(row.last_message_at),
         lastUserMessageAt: fromDateTime(row.last_user_message_at),
         lastBotMessageAt: fromDateTime(row.last_bot_message_at),
+        pausedAt: fromDateTime(row.paused_at),
+        pauseDetails: row.pause_details,
     });
 };

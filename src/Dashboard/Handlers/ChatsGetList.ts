@@ -10,6 +10,7 @@ interface ChatListItem {
     userName: string | null;
     lastMessageText: string | null;
     lastMessageAt: string | null;
+    paused: boolean;
 }
 
 export const chatsGetListHandler: RequestHandler<IRequest> = async (request) => {
@@ -41,11 +42,12 @@ export const chatsGetListHandler: RequestHandler<IRequest> = async (request) => 
             userName: name.length ? name : null,
             lastMessageText: row.last_message_text,
             lastMessageAt: fromDateTime(row.last_message_at),
+            paused: row.paused,
         });
     }
 
     const tail = rows.length === limit ? rows[rows.length - 1] : null;
-    const tailAt = tail ? fromDateTime(tail.last_message_at) : null;
+    const tailAt = tail ? fromDateTime(tail.sort_at) : null;
     const nextCursor = tail && tailAt ? PaginationCursor.encode(tailAt, tail.wa_phone) : null;
 
     return success({ items, nextCursor });

@@ -245,4 +245,92 @@ describe('attack: dashboard parties + guestlist', () => {
         assert.equal(String(mine[0]?.guestCount), dbCount?.n, 'guestCount = факт БД');
         assert.equal(dbCount?.n, '1', 'ровно один гость в БД');
     });
+
+    // ---------- новые поля (аддитивка): friends / price ----------
+
+    it('friends: спецсимволы (запятая/кавычки/скобки/бэкслеш/SQL-мета) — маппинг байт-в-байт с БД', async () => {
+        const nasty = [
+            'a,b',
+            'has"quote',
+            'brace}{',
+            'back\\slash',
+            'semi;colon',
+            "q'; drop--",
+            '',
+        ];
+        await withClient((c) =>
+            c.query(
+                `update party_guestlist set friends = $2
+                 where party_id = $1 and guest_id = (
+                    select id from guests where wa_phone = $3)`,
+                [ACTIVE_ID, nasty, GUEST_PHONE],
+            ),
+        );
+        const res = await guestlistReq(ACTIVE_ID);
+        assert.equal(res.status, 200);
+        const body = (await res.json()) as { friends: string[] }[];
+        assert.equal(body.length, 1, 'ровно один гость');
+
+        const dbRow = await dbOne<{ friends: string[] | null }>(
+            `select friends from party_guestlist where party_id = $1 and guest_id = (
+                select id from guests where wa_phone = $2)`,
+            [ACTIVE_ID, GUEST_PHONE],
+        );
+        // Сверка НАПРЯМУЮ с БД: спецсимволы уходят как значения, не как SQL; таблица цела.
+        assert.deepEqual(
+            body[0]?.friends,
+            dbRow?.friends,
+            'API friends == факт БД (без искажений)',
+        );
+        await tablesIntact();
+    });
+
+    it('friends: NULL и пустой массив → []', async () => {
+        await withClient((c) =>
+            c.query(
+                `update party_guestlist set friends = null
+                 where party_id = $1 and guest_id = (
+                    select id from guests where wa_phone = $2)`,
+                [ACTIVE_ID, GUEST_PHONE],
+            ),
+        );
+        let body = (await (await guestlistReq(ACTIVE_ID)).json()) as { friends: string[] }[];
+        assert.deepEqual(body[0]?.friends, [], 'friends NULL → []');
+
+        await withClient((c) =>
+            c.query(
+                `update party_guestlist set friends = '{}'::text[]
+                 where party_id = $1 and guest_id = (
+                    select id from guests where wa_phone = $2)`,
+                [ACTIVE_ID, GUEST_PHONE],
+            ),
+        );
+        body = (await (await guestlistReq(ACTIVE_ID)).json()) as { friends: string[] }[];
+        assert.deepEqual(body[0]?.friends, [], 'friends {} → []');
+    });
+
+    it('price: реальный numeric с копейками не теряется грубо; NULL → null (не 0/NaN)', async () => {
+        await withClient((c) =>
+            c.query(`update party set price = '4999.99' where id = $1`, [ACTIVE_ID]),
+        );
+        const readPrice = async (): Promise<number | null | undefined> => {
+            const b = (await (await partiesReq('limit=100')).json()) as {
+                items: { id: string; price: number | null }[];
+            };
+            return b.items.find((i) => i.id === ACTIVE_ID)?.price;
+        };
+        let price = await readPrice();
+        const dbPrice = await dbOne<{ price: string }>(
+            `select price::text as price from party where id = $1`,
+            [ACTIVE_ID],
+        );
+        assert.equal(typeof price, 'number', 'price → number');
+        assert.equal(Number(dbPrice?.price), price, 'price == факт БД (без грубой потери)');
+
+        await withClient((c) =>
+            c.query(`update party set price = null where id = $1`, [ACTIVE_ID]),
+        );
+        price = await readPrice();
+        assert.equal(price, null, 'price NULL → null (не 0/NaN)');
+    });
 });

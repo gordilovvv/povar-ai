@@ -1,12 +1,15 @@
 import type { PoolClient } from 'pg';
 import format from 'pg-format';
+import { toDateTime } from '#Lib/Fmt.js';
 
 export interface ChatListRow {
     wa_phone: string;
     first_name: string | null;
     last_name: string | null;
     last_message_at: string | null;
+    sort_at: string;
     last_message_text: string | null;
+    paused: boolean;
 }
 
 export interface ChatsCursor {
@@ -21,6 +24,8 @@ export interface ChatRow {
     last_message_at: string | null;
     last_user_message_at: string | null;
     last_bot_message_at: string | null;
+    paused_at: string | null;
+    pause_details: string | null;
 }
 
 export interface ChatMessageRow {
@@ -40,7 +45,9 @@ export const selectChat = async (client: PoolClient, phone: string) => {
                 guest.last_name,
                 greatest(chat.last_sent_message_at, chat.last_received_message_at) as last_message_at,
                 chat.last_received_message_at as last_user_message_at,
-                chat.last_sent_message_at as last_bot_message_at
+                chat.last_sent_message_at as last_bot_message_at,
+                chat.paused_at,
+                chat.pause_details
             from wa_chats chat
             left join guests guest on guest.id = chat.guest_id
             where chat.wa_phone = %L`,
@@ -72,6 +79,57 @@ export const selectChatMessages = async (
     return result.rows;
 };
 
+export const insertOutgoingMessage = async (
+    client: PoolClient,
+    message: { id: string; waMessageId: string; phone: string; text: string; sentAt: Date },
+) => {
+    await client.query(
+        format(
+            `insert into wa_messages
+                (id, wa_message_id, wa_chat_phone, text, owner, status, sent_at)
+            values
+                (%L, %L, %L, %L, 'sema', 'sent', %L)`,
+            message.id,
+            message.waMessageId,
+            message.phone,
+            message.text,
+            toDateTime(message.sentAt),
+        ),
+    );
+};
+
+export const updateChatLastSent = async (client: PoolClient, phone: string, sentAt: Date) => {
+    await client.query(
+        format(
+            `update wa_chats
+                set last_sent_message_at = greatest(last_sent_message_at, %L)
+            where wa_phone = %L`,
+            toDateTime(sentAt),
+            phone,
+        ),
+    );
+};
+
+export const updateChatPause = async (
+    client: PoolClient,
+    phone: string,
+    pausedAt: Date | null,
+    details: string | null,
+) => {
+    const result = await client.query(
+        format(
+            `update wa_chats
+                set paused_at = %L, pause_details = %L
+            where wa_phone = %L
+            returning wa_phone`,
+            pausedAt === null ? null : toDateTime(pausedAt),
+            details,
+            phone,
+        ),
+    );
+    return result.rows.length > 0;
+};
+
 export const selectChatsList = async (
     client: PoolClient,
     cursor: ChatsCursor | null,
@@ -79,23 +137,32 @@ export const selectChatsList = async (
 ) => {
     const result = await client.query<ChatListRow>(
         format(
-            `select
-                chat.wa_phone,
-                guest.first_name,
-                guest.last_name,
-                greatest(chat.last_sent_message_at, chat.last_received_message_at) as last_message_at,
-                (select message.text
-                    from wa_messages message
-                    where message.wa_chat_phone = chat.wa_phone
-                    order by message.id desc
-                    limit 1) as last_message_text
-            from wa_chats chat
-            left join guests guest on guest.id = chat.guest_id
+            // null last_message_at -> epoch, иначе чат без сообщений выпадает из keyset (null не проходит </=)
+            `with base as (
+                select
+                    chat.wa_phone,
+                    guest.first_name,
+                    guest.last_name,
+                    greatest(chat.last_sent_message_at, chat.last_received_message_at) as last_message_at,
+                    coalesce(
+                        greatest(chat.last_sent_message_at, chat.last_received_message_at),
+                        'epoch'::timestamptz
+                    ) as sort_at,
+                    (select message.text
+                        from wa_messages message
+                        where message.wa_chat_phone = chat.wa_phone
+                        order by message.id desc
+                        limit 1) as last_message_text,
+                    chat.paused_at is not null as paused
+                from wa_chats chat
+                left join guests guest on guest.id = chat.guest_id
+            )
+            select wa_phone, first_name, last_name, last_message_at, sort_at, last_message_text, paused
+            from base
             where %L::timestamptz is null
-                or greatest(chat.last_sent_message_at, chat.last_received_message_at) < %L::timestamptz
-                or (greatest(chat.last_sent_message_at, chat.last_received_message_at) = %L::timestamptz
-                    and chat.wa_phone < %L)
-            order by last_message_at desc nulls last, chat.wa_phone desc
+                or sort_at < %L::timestamptz
+                or (sort_at = %L::timestamptz and wa_phone < %L)
+            order by sort_at desc, wa_phone desc
             limit %L`,
             cursor?.last_message_at ?? null,
             cursor?.last_message_at ?? null,
