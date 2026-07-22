@@ -43,28 +43,27 @@ export class Checklist {
         if (instaAsked) {
             done.push('ask for the instagram');
         }
-        if (tableAnswered) {
+        if (tableOffered || tableAnswered) {
             done.push('offer a table');
         }
 
         let now: string;
         if (!greeted) {
-            now = 'Greet the guest and pitch the parties once via get_party.';
+            now = 'greet + pitch (get_party)';
         } else if (!entry) {
-            // питч не оставляет следа в базе: без оговорки указатель встал бы на нём навсегда
+            // питч и гест-фраза не оставляют следа в базе — были ли они, видно только по истории
             now = named
-                ? 'Call save_guest with the name you already have and the party_id.'
-                : "Unless you have already pitched the parties in this chat, pitch them once via get_party; otherwise ask for the guest's first and last name and call save_guest with it the moment it arrives.";
+                ? 'name is known but not saved — call save_guest with it and the party_id'
+                : 'waiting for the name — just answer; the guestlist move happens only if history shows it was never said';
         } else if (!instaAsked) {
             now =
-                "Ask for the guest's instagram once and call save_guest with insta_asked in the same turn — never wait for the answer. In the same reply confirm the guest is on the list, with the entry conditions; in your next reply send our instagram and the WhatsApp group, unprompted.";
+                'instagram (once, save_guest insta_asked immediately) + confirm the list with entry conditions';
         } else if (!tableAnswered) {
             now = tableOffered
-                ? 'A table was already offered and the guest has not answered — never raise it again. Keep answering about the party, and pass the answer to save_guest as want_table if it ever comes.'
-                : "Offer a table once and pass the guest's answer to save_guest as want_table — the tool answers the guest itself.";
+                ? 'nothing — table already offered, wait; save_guest want_table if the answer comes'
+                : 'offer a table (once)';
         } else {
-            now =
-                'The funnel is over. Keep answering about the party; anything only Sema can decide — money, exceptions, a fact you were not given — goes to pause_chat.';
+            now = 'nothing — funnel over, just keep answering';
         }
 
         return [

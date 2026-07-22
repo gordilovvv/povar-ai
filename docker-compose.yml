@@ -12,3 +12,13 @@ services:
     restart: unless-stopped
     env_file: .env
     command: ["node", "dist/Worker.js"]
+
+  dashboard:
+    image: sema-ai:${VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8081"
+    env_file: .env
+    environment:
+      PORT: 8081
+    command: ["node", "dist/Dashboard/index.js"]

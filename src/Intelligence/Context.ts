@@ -1,10 +1,11 @@
 import type { PoolClient } from 'pg';
 import { type PartyGuestlistStorage, selectGuestlistByGuest } from '#Db/Guestlist.js';
-import { type GuestStorage, selectGuestByPhone } from '#Db/Guests.js';
+import { type GuestStorage, selectGuestByPhone, updateGuestLang } from '#Db/Guests.js';
 import { type PartyWithTimeStorage, selectActivePartiesWithTimes } from '#Db/Party.js';
 import { pool } from '#Db/Pool.js';
 import { selectWaChat, type WaChatStorage } from '#Db/WaChats.js';
 import { selectWaChatMessages, type WaMessageStorage } from '#Db/WaMessages.js';
+import { parseLanguage } from '#Lib/Lang.js';
 import { formatDubaiNow } from '#Lib/Time.js';
 
 interface ChatState {
@@ -40,6 +41,18 @@ export class Context {
 
             const parties = await selectActivePartiesWithTimes(client);
             const state = await Context.loadState(client, phone, parties);
+
+            if (!state.guest.lang) {
+                const lang = parseLanguage(
+                    messages.flatMap((message) =>
+                        message.owner === 'guest' && message.text ? [message.text] : [],
+                    ),
+                );
+                if (lang) {
+                    state.guest =
+                        (await updateGuestLang(client, state.guest.id, lang)) ?? state.guest;
+                }
+            }
 
             return new Context(phone, messages, parties, state);
         } finally {

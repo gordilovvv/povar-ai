@@ -18,8 +18,8 @@ const input = z.object({
 });
 
 const PAUSE_MESSAGES: Record<Lang, string> = {
-    ru: 'Позову Сёму, он ответит тебе сам',
-    en: "Let me get Sema, he'll answer you himself",
+    ru: 'Уточню информацию и скоро вернусь',
+    en: "I'll check the details and get back to you soon",
 } as const;
 
 const RES = {

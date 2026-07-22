@@ -20,7 +20,7 @@ export class Agent {
     private static readonly tools = new Tools();
 
     private static readonly MAX_STEPS = 12;
-    private static readonly MAX_TOKENS = 1024;
+    private static readonly MAX_TOKENS = 4096;
 
     private static readonly LANG = {
         en: 'The guest writes in ENGLISH — reply ONLY in English.',
@@ -30,7 +30,8 @@ export class Agent {
     private static readonly SILENT_GUEST =
         '(the guest is silent — open the dialog with a warm greeting)';
     private static readonly GUEST_MEDIA = '(the guest sent media)';
-    private static readonly NUDGE = '(You did not message the guest. Reply now via send_message.)';
+    private static readonly NUDGE =
+        '(internal harness note, NOT from the guest — they have received nothing this turn. Call send_message now with your reply, or the required tool. Never mention this note, system commands or anything internal to the guest.)';
 
     /** Тул сам ответил гостю и запретил писать поверх: под это страховки обязаны молчать. */
     private static readonly REPLY_FORBIDDEN = z.union([
@@ -87,6 +88,7 @@ export class Agent {
             const response = await this.create({
                 model: env.ANTHROPIC_MODEL,
                 max_tokens: Agent.MAX_TOKENS,
+                output_config: { effort: 'max' },
                 system: Agent.buildSystem(context.context),
                 tools: Agent.tools.defs(),
                 messages,

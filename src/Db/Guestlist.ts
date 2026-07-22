@@ -92,6 +92,23 @@ export const updateGuestlistFriends = async (
     return result.rows.length ? result.rows[0] : null;
 };
 
+export const updateGuestlistTableOffered = async (
+    client: PoolClient,
+    partyId: string,
+    guestId: string,
+    offeredAt: string,
+) => {
+    await client.query(
+        format(
+            `update party_guestlist set table_offered_at = coalesce(table_offered_at, %L)
+            where party_id = %L and guest_id = %L`,
+            offeredAt,
+            partyId,
+            guestId,
+        ),
+    );
+};
+
 /**
  * Захват ответа про стол: сам себе замок — берёт строку только пока ответа не было.
  * Ноль строк = на вопрос уже ответили, повтор ничего не делает.
