@@ -10,9 +10,12 @@ import { pool as dashboardPool } from '#Dashboard/Db/Pool.js';
 import { signJwt } from '#Dashboard/Lib/Jwt.js';
 import { dashboardFetch } from '#Dashboard/Router.js';
 
-const DEV_PASSWORD = 'dev-admin-Pass_2026';
+const DEV_PASSWORD = 'SemaAI2026@';
 const ADMIN_PHONE = process.env.ADMIN_PHONE ?? '';
 const JWT_SECRET = process.env.JWT_SECRET ?? '';
+// Свой seed-номер, не ADMIN_PHONE: чистка в after() не должна стирать реального
+// админа из общей dev/prod-базы.
+const SEED_PHONE = 'E2E_auth_attack_user';
 
 function post(path: string, body: unknown): Promise<Response> {
     return dashboardFetch(
@@ -50,23 +53,23 @@ async function freshRefreshToken(): Promise<string> {
 }
 
 function validAccessToken(): string {
-    return signJwt({ sub: ADMIN_PHONE, exp: Math.floor(Date.now() / 1000) + 3600 }, JWT_SECRET);
+    return signJwt({ sub: SEED_PHONE, exp: Math.floor(Date.now() / 1000) + 3600 }, JWT_SECRET);
 }
 
 describe('attack: dashboard auth', () => {
-    // Сажаем dashboard_users с id = ADMIN_PHONE (sub access-JWT). Без этой строки /chats
+    // Сажаем dashboard_users с id = SEED_PHONE (sub access-JWT). Без этой строки /chats
     // отдаёт 401 ВСЕГДА (и валидному токену) — тогда 401 на подделку ничего не доказывает.
     // С ней валидный токен → 200, значит 401 подделки = именно провал подписи/exp.
     before(async () => {
         await dashboardPool.query(
             `insert into dashboard_users (id, phone_number, created_at)
              values ($1, $1, now()) on conflict (id) do nothing`,
-            [ADMIN_PHONE],
+            [SEED_PHONE],
         );
     });
 
     after(async () => {
-        await dashboardPool.query(`delete from dashboard_users where id = $1`, [ADMIN_PHONE]);
+        await dashboardPool.query(`delete from dashboard_users where id = $1`, [SEED_PHONE]);
         await dashboardPool.end();
     });
 
@@ -194,14 +197,14 @@ describe('attack: dashboard auth', () => {
 
     it('/chats: alg:none (пустая подпись) → 401', async () => {
         const header = b64url({ alg: 'none', typ: 'JWT' });
-        const body = b64url({ sub: ADMIN_PHONE, exp: Math.floor(Date.now() / 1000) + 3600 });
+        const body = b64url({ sub: SEED_PHONE, exp: Math.floor(Date.now() / 1000) + 3600 });
         const res = await getChats(`${header}.${body}.`);
         assert.equal(res.status, 401);
     });
 
     it('/chats: подпись чужим секретом → 401', async () => {
         const forged = signJwt(
-            { sub: ADMIN_PHONE, exp: Math.floor(Date.now() / 1000) + 3600 },
+            { sub: SEED_PHONE, exp: Math.floor(Date.now() / 1000) + 3600 },
             'evil-secret-not-the-real-one',
         );
         const res = await getChats(forged);
@@ -210,7 +213,7 @@ describe('attack: dashboard auth', () => {
 
     it('/chats: подмена payload при валидной старой подписи → 401', async () => {
         const good = signJwt(
-            { sub: ADMIN_PHONE, exp: Math.floor(Date.now() / 1000) + 3600 },
+            { sub: SEED_PHONE, exp: Math.floor(Date.now() / 1000) + 3600 },
             JWT_SECRET,
         );
         const [h, , sig] = good.split('.');
@@ -224,7 +227,7 @@ describe('attack: dashboard auth', () => {
 
     it('/chats: exp в прошлом (валидная подпись) → 401', async () => {
         const expired = signJwt(
-            { sub: ADMIN_PHONE, exp: Math.floor(Date.now() / 1000) - 10 },
+            { sub: SEED_PHONE, exp: Math.floor(Date.now() / 1000) - 10 },
             JWT_SECRET,
         );
         const res = await getChats(expired);
@@ -233,7 +236,7 @@ describe('attack: dashboard auth', () => {
 
     it('/chats: лишний сегмент в JWT → 401', async () => {
         const good = signJwt(
-            { sub: ADMIN_PHONE, exp: Math.floor(Date.now() / 1000) + 3600 },
+            { sub: SEED_PHONE, exp: Math.floor(Date.now() / 1000) + 3600 },
             JWT_SECRET,
         );
         const res = await getChats(`${good}.extrasegment`);
@@ -242,7 +245,7 @@ describe('attack: dashboard auth', () => {
 
     it('/chats: битая подпись (обрезана) → 401', async () => {
         const good = signJwt(
-            { sub: ADMIN_PHONE, exp: Math.floor(Date.now() / 1000) + 3600 },
+            { sub: SEED_PHONE, exp: Math.floor(Date.now() / 1000) + 3600 },
             JWT_SECRET,
         );
         const [h, body] = good.split('.');

@@ -4,8 +4,12 @@ import type { PartiesKeyset } from '#Dashboard/Lib/PaginationCursor.js';
 
 export interface PartyListRow {
     id: string;
+    type: string;
     name: string;
+    price: string | null;
     location: string;
+    reels_url: string | null;
+    notes: string | null;
     starts_at: string | null;
     guest_count: string;
     bucket: number;
@@ -15,6 +19,9 @@ export interface GuestlistRow {
     first_name: string | null;
     last_name: string | null;
     instagram: string | null;
+    friends: string[] | null;
+    joined_at: string | null;
+    table_offered_at: string | null;
 }
 
 /**
@@ -34,8 +41,12 @@ export const selectPartiesList = async (
             `with parties as (
                 select
                     party.id,
+                    party.type,
                     party.name,
+                    party.price,
                     party.location,
+                    party.reels_url,
+                    party.notes,
                     (select min(time.party_start_at)
                         from party_time time where time.party_id = party.id) as starts_at,
                     (select count(*)
@@ -51,7 +62,7 @@ export const selectPartiesList = async (
                     end as bucket
                 from parties
             )
-            select id, name, location, starts_at, guest_count, bucket
+            select id, type, name, price, location, reels_url, notes, starts_at, guest_count, bucket
             from ranked
             where %L::int is null
                 or bucket < %L::int
@@ -87,7 +98,8 @@ export const selectPartiesList = async (
 export const selectPartyGuestlist = async (client: PoolClient, partyId: string) => {
     const result = await client.query<GuestlistRow>(
         format(
-            `select guest.first_name, guest.last_name, guest.instagram
+            `select guest.first_name, guest.last_name, guest.instagram,
+                list.friends, list.joined_at, list.table_offered_at
             from party_guestlist list
             join guests guest on guest.id = list.guest_id
             where list.party_id = %L

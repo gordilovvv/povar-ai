@@ -14,12 +14,18 @@ importers:
       '@whatwg-node/server':
         specifier: ^0.11.0
         version: 0.11.0
+      cyrillic-to-translit-js:
+        specifier: ^3.2.1
+        version: 3.2.1
       dayjs:
         specifier: ^1.11.21
         version: 1.11.21
       itty-router:
         specifier: ^5.0.22
         version: 5.0.24
+      libphonenumber-js:
+        specifier: ^1.13.9
+        version: 1.13.9
       pg:
         specifier: ^8.16.3
         version: 8.22.0
@@ -471,6 +477,9 @@ packages:
   colorette@2.0.20:
     resolution: {integrity: sha512-IfEDxwoWIjkeXL1eXcDiow4UbKjhLdq6/EuSVR9GMN7KVH3r9gQ83e73hsz1Nd1T3ijd5xv1wcWRYO+D6kCI2w==}
 
+  cyrillic-to-translit-js@3.2.1:
+    resolution: {integrity: sha512-HFO+fx4t9J6bfeV5DUKmkzav15ktg+6LDjODj6+CRzrFil8YuzR6wRQiDI7OxwY5q4alCEP+sNEjhdQ65TIDzw==}
+
   dateformat@4.6.3:
     resolution: {integrity: sha512-2P0p0pFGzHS5EMnhdxQi7aJN+iMheud0UhG4dlE1DLAlvL8JHjJJTX/CSm4JXwV0Ka5nGk3zC5mcb5bUQUxxMA==}
 
@@ -512,6 +521,12 @@ packages:
   json-schema-to-ts@3.1.1:
     resolution: {integrity: sha512-+DWg8jCJG2TEnpy7kOm/7/AxaYoaRbjVB4LFZLySZlWn8exGs3A4OLJR966cVvU26N7X9TWxl+Jsw7dzAqKT6g==}
     engines: {node: '>=16'}
+
+  libphonenumber-js@1.13.9:
+    resolution: {integrity: sha512-VNS5vWMM7r0P66BYv+TQJATxExEgLxN+34hfHDVhDkUsGAE4cRg0shCNSLTXNKm7nIUscC7AfB51TjxEeF7msQ==}
+
+  lodash.invert@4.3.0:
+    resolution: {integrity: sha512-3CJmOxN5y47rd+g5XjdZNcq2SorJkvlSqBwPomT094p6LZ4p7b5bUoRzYYMjwsTGWTW77z/dFZlCzeVQxBrZVg==}
 
   minimist@1.2.8:
     resolution: {integrity: sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA==}
@@ -909,6 +924,10 @@ snapshots:
 
   colorette@2.0.20: {}
 
+  cyrillic-to-translit-js@3.2.1:
+    dependencies:
+      lodash.invert: 4.3.0
+
   dateformat@4.6.3: {}
 
   dayjs@1.11.21: {}
@@ -965,6 +984,10 @@ snapshots:
     dependencies:
       '@babel/runtime': 7.29.7
       ts-algebra: 2.0.0
+
+  libphonenumber-js@1.13.9: {}
+
+  lodash.invert@4.3.0: {}
 
   minimist@1.2.8: {}
 

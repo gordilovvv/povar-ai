@@ -387,4 +387,180 @@ describe('attack: dashboard chatGet + chatGetMessages', () => {
         const mine = body.items.filter((m) => IDS.includes(m.id));
         assert.equal(mine.length, MSGS.length, 'messages-роут реально отработал');
     });
+
+    // ---------- GET /chats (список) — ранее не покрытая ручка ----------
+    // Аддитивка: item.paused = (paused_at is not null). Проверяем, что новая
+    // колонка не размножила/не потеряла строки и keyset жив.
+
+    const LIST_NUL = 'E2E_atk_cl_null'; // без сообщений/таймстампов → last_message_at NULL
+    const LIST_F1 = 'E2E_atk_cl_f1';
+    const LIST_F2 = 'E2E_atk_cl_f2';
+    const LIST_T1 = '2099-06-01T10:00:00.000Z';
+    const LIST_T2 = '2099-06-01T09:00:00.000Z';
+
+    async function seedList(): Promise<void> {
+        await withClient(async (client) => {
+            await client.query(`delete from wa_chats where wa_phone = any($1)`, [
+                [LIST_NUL, LIST_F1, LIST_F2],
+            ]);
+            await client.query(`insert into wa_chats (wa_phone) values ($1)`, [LIST_NUL]);
+            await client.query(
+                `insert into wa_chats (wa_phone, last_received_message_at) values ($1, $2)`,
+                [LIST_F1, toDateTime(new Date(LIST_T1))],
+            );
+            await client.query(
+                `insert into wa_chats (wa_phone, last_received_message_at, paused_at, pause_details)
+                 values ($1, $2, $3, 'на паузе')`,
+                [LIST_F2, toDateTime(new Date(LIST_T2)), toDateTime(new Date(LIST_T2))],
+            );
+        });
+    }
+
+    async function cleanupList(): Promise<void> {
+        await withClient(async (client) => {
+            await client.query(`delete from wa_chats where wa_phone = any($1)`, [
+                [LIST_NUL, LIST_F1, LIST_F2],
+            ]);
+        });
+    }
+
+    function authList(query: string): Request {
+        return req(`/chats${query}`, { authorization: `Bearer ${token}` });
+    }
+
+    interface ListResponse {
+        items: { phone: string; paused: boolean }[];
+        nextCursor: string | null;
+    }
+
+    it('list auth: нет токена → 401, список не течёт', async () => {
+        const res = await dashboardFetch(req('/chats'));
+        assert.equal(res.status, 401);
+        const body = (await res.json()) as Record<string, unknown>;
+        assert.equal(body.items, undefined, 'без токена items не отдаются');
+    });
+
+    it('list auth: валидная подпись на удалённого юзера → 401', async () => {
+        const orphan = signJwt(
+            { sub: ulid(), exp: Math.floor(Date.now() / 1000) + 3600 },
+            process.env.JWT_SECRET ?? '',
+        );
+        const res = await dashboardFetch(req('/chats', { authorization: `Bearer ${orphan}` }));
+        assert.equal(res.status, 401);
+    });
+
+    it('list cursor: мусор без разделителя → 400', async () => {
+        const res = await dashboardFetch(authList('?cursor=not-a-cursor'));
+        assert.equal(res.status, 400, 'битый курсор режется валидацией');
+    });
+
+    it('list cursor: SQL-инъекция → 400 или значение, таблица wa_chats цела', async () => {
+        for (const evil of [
+            "' or 1=1; drop table wa_chats;--",
+            "2099-06-01T10:00:00.000Z|'; drop table wa_chats;--",
+        ]) {
+            const res = await dashboardFetch(authList(`?cursor=${encodeURIComponent(evil)}`));
+            assert.notEqual(res.status, 500, `cursor-инъекция (${evil}) не роняет`);
+        }
+        const reg = await dbOne<{ m: string | null }>(`select to_regclass('public.wa_chats') as m`);
+        assert.equal(reg?.m, 'wa_chats', 'таблица wa_chats цела после cursor-инъекции');
+    });
+
+    it('list limit: отрицательный → clamp к 1; гигантский → clamp к 100', async () => {
+        const neg = await dashboardFetch(authList('?limit=-5'));
+        assert.equal(neg.status, 200);
+        const negBody = (await neg.json()) as ListResponse;
+        assert.equal(negBody.items.length, 1, 'negative limit клампится к 1');
+
+        const huge = await dashboardFetch(authList('?limit=999999999'));
+        assert.equal(huge.status, 200);
+        const hugeBody = (await huge.json()) as ListResponse;
+        assert.ok(hugeBody.items.length <= 100, 'гигантский limit клампится к 100');
+    });
+
+    it('list paused: флаг == (paused_at is not null) в БД, строки не размножены', async () => {
+        await seedList();
+        try {
+            const res = await dashboardFetch(authList('?limit=100'));
+            assert.equal(res.status, 200);
+            const body = (await res.json()) as ListResponse;
+
+            const mine = body.items.filter((c) => [LIST_NUL, LIST_F1, LIST_F2].includes(c.phone));
+            // Аддитивная колонка — scalar-проекция: ни одна строка не должна задвоиться.
+            assert.equal(
+                new Set(mine.map((c) => c.phone)).size,
+                mine.length,
+                'paused-проекция не размножила строки',
+            );
+
+            const db = await dbQuery<{ wa_phone: string; paused: boolean }>(
+                `select wa_phone, paused_at is not null as paused
+                 from wa_chats where wa_phone = any($1)`,
+                [[LIST_NUL, LIST_F1, LIST_F2]],
+            );
+            const dbFlag = new Map(db.map((r) => [r.wa_phone, r.paused]));
+            for (const item of mine) {
+                assert.equal(
+                    item.paused,
+                    dbFlag.get(item.phone),
+                    `paused для ${item.phone} == факт БД`,
+                );
+            }
+            assert.equal(dbFlag.get(LIST_F2), true, 'F2 реально на паузе (иначе проба не бьёт)');
+        } finally {
+            await cleanupList();
+        }
+    });
+
+    it('list keyset: чат без last_message_at не теряется под пагинацией (сверка с БД)', async () => {
+        await seedList();
+        try {
+            // F1/F2 датированы 2099 → идут первыми; NUL c NULL last_message_at
+            // обязан быть где-то в выдаче. Проходим keyset до конца и собираем phone.
+            const seen: string[] = [];
+            let cursor: string | null = null;
+            for (let page = 0; page < 500; page++) {
+                const q = cursor ? `?limit=1&cursor=${encodeURIComponent(cursor)}` : '?limit=1';
+                const res = await dashboardFetch(authList(q));
+                assert.equal(res.status, 200);
+                const body = (await res.json()) as ListResponse;
+                if (body.items.length === 0) {
+                    break;
+                }
+                for (const it of body.items) {
+                    seen.push(it.phone);
+                }
+                cursor = body.nextCursor;
+                if (cursor === null) {
+                    break;
+                }
+            }
+
+            assert.equal(new Set(seen).size, seen.length, 'keyset не дублирует строки');
+            assert.ok(seen.includes(LIST_F1), 'F1 (2099) присутствует в пагинации');
+            assert.ok(seen.includes(LIST_F2), 'F2 (2099) присутствует в пагинации');
+
+            // Факт БД: NUL существует и виден на одной полной странице.
+            const full = await dashboardFetch(authList('?limit=100'));
+            const fullBody = (await full.json()) as ListResponse;
+            assert.ok(
+                fullBody.items.some((c) => c.phone === LIST_NUL),
+                'NUL виден на полной странице (limit=100)',
+            );
+            const exists = await dbOne<{ n: string }>(
+                `select wa_phone as n from wa_chats where wa_phone = $1`,
+                [LIST_NUL],
+            );
+            assert.equal(exists?.n, LIST_NUL, 'NUL реально есть в БД');
+
+            // Дыра: под keyset-пагинацией NUL (last_message_at IS NULL) выпадает —
+            // WHERE отсекает NULL при непустом курсоре, order by nulls last прячет их в хвост.
+            assert.ok(
+                seen.includes(LIST_NUL),
+                'чат без сообщений не должен теряться под keyset-пагинацией',
+            );
+        } finally {
+            await cleanupList();
+        }
+    });
 });

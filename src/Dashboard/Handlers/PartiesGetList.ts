@@ -8,8 +8,12 @@ import { fromDateTime, minMax, safeParseInt, safeParseString } from '#Lib/Fmt.js
 
 interface PartyListItem {
     id: string;
+    type: string;
     name: string;
+    price: number | null;
     location: string;
+    reelsUrl: string | null;
+    notes: string | null;
     startsAt: string | null;
     guestCount: number;
 }
@@ -40,8 +44,12 @@ export const partiesGetListHandler: RequestHandler<IRequest> = async (request) =
     for (const row of rows) {
         items.push({
             id: row.id,
+            type: row.type,
             name: row.name,
+            price: row.price === null ? null : Number(row.price),
             location: row.location,
+            reelsUrl: row.reels_url,
+            notes: row.notes,
             startsAt: fromDateTime(row.starts_at),
             guestCount: Number(row.guest_count),
         });

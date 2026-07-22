@@ -6,6 +6,8 @@ import {
     type WaMessageStorage,
 } from '#Db/WaMessages.js';
 import { Agent } from '#Intelligence/Agent.js';
+import { startGuestlistJob } from '#Jobs/Guestlist.js';
+import { startPauseAlertJob } from '#Jobs/PauseAlert.js';
 import { toDateTime } from '#Lib/Fmt.js';
 import { Logger } from '#Lib/Logger.js';
 import { sleep } from '#Lib/Sleep.js';
@@ -103,6 +105,8 @@ try {
 
 running = true;
 void run();
+startGuestlistJob();
+startPauseAlertJob();
 
 process.on('SIGTERM', () => {
     running = false;
