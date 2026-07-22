@@ -121,6 +121,6 @@ typescript, pg + pg-format, Grammy, Zod, Pino + Pino Pretty. Менеджер п
 
 Цикл приёмки хендлеров/API (node:test, `e2e-critic`, attack-тесты, жёсткое определение «готово», probe-бенчмарки, сверка с БД) — в `src/Dashboard/CLAUDE.md`.
 
-Полный flow через WhatsApp (вебхук → воркер → агент → ответ) — **обязательно вызови скилл `e2e-whatsapp-test`**: живая переписка с Семой в браузере, вердикт по поведению и БД. `simplifier` — на дифф перед финалом.
+Проверка поведения агента (промпты, тулы, state-блок) — **обязательно вызови скилл `e2e-whatsapp-test`**: диалоговые пробы `tests/probes/*.ts` с реальными вызовами модели, вердикт по переписке, debug-логам и БД. `simplifier` — на дифф перед финалом.
 
 Probe гоняй только через `tsx --conditions=development` (голый `node ...ts` уводит `#`-импорты в `dist/`).
