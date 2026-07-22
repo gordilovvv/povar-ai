@@ -19,7 +19,7 @@ export class Checklist {
               ? '— (asked, unanswered)'
               : '—';
         const partyName = entry
-            ? (parties.find((party) => party.id === entry.party_id)?.name ?? entry.party_id)
+            ? `${parties.find((party) => party.id === entry.party_id)?.name ?? entry.party_id} (party_id: ${entry.party_id})`
             : null;
 
         const state = [

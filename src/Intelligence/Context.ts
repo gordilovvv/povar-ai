@@ -34,9 +34,10 @@ export class Context {
             );
             // запрос отдаёт последние N по id: порядок хода — по sent_at, id разводит одну секунду
             messages.sort((a, b) => {
-                const [left, right] =
-                    a.sent_at === b.sent_at ? [a.id, b.id] : [a.sent_at, b.sent_at];
-                return left < right ? -1 : left > right ? 1 : 0;
+                // pg отдаёт timestamptz как Date: `===` сравнивает ссылки и тай-брейк по id никогда не срабатывает
+                const left = new Date(a.sent_at).getTime();
+                const right = new Date(b.sent_at).getTime();
+                return left !== right ? left - right : a.id < b.id ? -1 : 1;
             });
 
             const parties = await selectActivePartiesWithTimes(client);

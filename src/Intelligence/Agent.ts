@@ -20,7 +20,8 @@ export class Agent {
     private static readonly tools = new Tools();
 
     private static readonly MAX_STEPS = 12;
-    private static readonly MAX_TOKENS = 4096;
+    // thinking ест из MAX_TOKENS: лимит должен оставлять запас на сам ответ
+    private static readonly MAX_TOKENS = 8192;
 
     private static readonly LANG = {
         en: 'The guest writes in ENGLISH — reply ONLY in English.',
@@ -32,6 +33,9 @@ export class Agent {
     private static readonly GUEST_MEDIA = '(the guest sent media)';
     private static readonly NUDGE =
         '(internal harness note, NOT from the guest — they have received nothing this turn. Call send_message now with your reply, or the required tool. Never mention this note, system commands or anything internal to the guest.)';
+    /** Голый текст с этими маркерами — мета-рассуждение модели, гостю не пересылаем. */
+    private static readonly META_TEXT =
+        /инструкц|системн|внутренн|не буду отвечать|internal|harness|instruction/i;
 
     /** Тул сам ответил гостю и запретил писать поверх: под это страховки обязаны молчать. */
     private static readonly REPLY_FORBIDDEN = z.union([
@@ -88,6 +92,7 @@ export class Agent {
             const response = await this.create({
                 model: env.ANTHROPIC_MODEL,
                 max_tokens: Agent.MAX_TOKENS,
+                thinking: { type: 'adaptive' },
                 output_config: { effort: 'max' },
                 system: Agent.buildSystem(context.context),
                 tools: Agent.tools.defs(),
@@ -101,8 +106,12 @@ export class Agent {
             usage.cacheWrite += response.usage.cache_creation_input_tokens ?? 0;
 
             const toolUses = response.content.filter((block) => block.type === 'tool_use');
+            const thinkingChars = response.content.reduce(
+                (sum, block) => sum + (block.type === 'thinking' ? block.thinking.length : 0),
+                0,
+            );
             Logger.debug(
-                `[agent] ${this.phone} step ${step} stop=${response.stop_reason} tools=${toolUses.map((tool) => tool.name).join(',') || '-'} in=${response.usage.input_tokens} out=${response.usage.output_tokens}`,
+                `[agent] ${this.phone} step ${step} stop=${response.stop_reason} tools=${toolUses.map((tool) => tool.name).join(',') || '-'} think=${thinkingChars}ch in=${response.usage.input_tokens} out=${response.usage.output_tokens}`,
             );
 
             if (toolUses.length) {
@@ -144,8 +153,13 @@ export class Agent {
                     : [],
             );
             if (bubbles.length) {
-                await Agent.tools.run(sendMessage.name, { texts: bubbles }, ctx);
-                break;
+                if (!Agent.META_TEXT.test(bubbles.join('\n'))) {
+                    await Agent.tools.run(sendMessage.name, { texts: bubbles }, ctx);
+                    break;
+                }
+                Logger.logError(
+                    `[agent] ${this.phone} step ${step} meta text caught, not sent: ${bubbles.join(' | ')}`,
+                );
             }
 
             if (nudged) {
