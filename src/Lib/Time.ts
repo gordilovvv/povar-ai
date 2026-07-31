@@ -19,7 +19,7 @@ export const getDubaiTime = () => dayjs().tz(DUBAI_TZ);
 
 export const formatDubai = (date: Date | string, lang: Lang) => {
     const d = dayjs(date).tz(DUBAI_TZ);
-    return `${weekday(d, lang)} ${d.format('DD.MM HH:mm')}`;
+    return `${weekday(d, lang)} ${d.format(lang === 'en' ? 'DD.MM h:mma' : 'DD.MM HH:mm')}`;
 };
 
 export const formatDubaiNow = () => {
