@@ -117,6 +117,10 @@ typescript, pg + pg-format, Grammy, Zod, Pino + Pino Pretty. Менеджер п
 ### Логирование производительности
 Замер времени выполнения через `process.hrtime()` — вызов до и после операции, вывод через `console.log` с тегом `[модуль]`, идентификатором контекста, кратким описанием операции и временем в формате `Xs Yms`.
 
+## Открытые вопросы
+
+- **BSUID (`from_user_id`)** — новое поле входящего WhatsApp-вебхука: ISO-код страны + точка + идентификатор (`FR.1024146263705283`). Появилось с раскаткой WhatsApp usernames, обязательная поддержка для бизнесов с июня 2026. Сейчас не парсим и не храним — TODO в `src/Webhook.ts`. Док: https://developers.facebook.com/documentation/business-messaging/whatsapp/business-scoped-user-ids/
+
 ## Самотестирование при разработке
 
 Цикл приёмки хендлеров/API (node:test, `e2e-critic`, attack-тесты, жёсткое определение «готово», probe-бенчмарки, сверка с БД) — в `src/Dashboard/CLAUDE.md`.

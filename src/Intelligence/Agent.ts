@@ -8,6 +8,7 @@ import { Prompts } from '#Intelligence/Prompts.js';
 import sendMessage from '#Intelligence/Tools/SendMessage.js';
 import { Tools } from '#Intelligence/Tools.js';
 import { Logger } from '#Lib/Logger.js';
+import { formatDubaiStamp } from '#Lib/Time.js';
 import type { ToolContext } from '#Lib/Tools.js';
 import { sendTypingIndicator } from '#Platforms/Whatsapp/index.js';
 
@@ -106,13 +107,15 @@ export class Agent {
             usage.cacheWrite += response.usage.cache_creation_input_tokens ?? 0;
 
             const toolUses = response.content.filter((block) => block.type === 'tool_use');
-            const thinkingChars = response.content.reduce(
-                (sum, block) => sum + (block.type === 'thinking' ? block.thinking.length : 0),
-                0,
-            );
+            const thinking = response.content
+                .flatMap((block) => (block.type === 'thinking' ? [block.thinking] : []))
+                .join('\n');
             Logger.debug(
-                `[agent] ${this.phone} step ${step} stop=${response.stop_reason} tools=${toolUses.map((tool) => tool.name).join(',') || '-'} think=${thinkingChars}ch in=${response.usage.input_tokens} out=${response.usage.output_tokens}`,
+                `[agent] ${this.phone} step ${step} stop=${response.stop_reason} tools=${toolUses.map((tool) => tool.name).join(',') || '-'} think=${thinking.length}ch in=${response.usage.input_tokens} out=${response.usage.output_tokens}`,
             );
+            if (thinking) {
+                Logger.debug(`[agent] ${this.phone} step ${step} thinking: ${thinking}`);
+            }
 
             if (toolUses.length) {
                 const results: Anthropic.ToolResultBlockParam[] = [];
@@ -180,10 +183,15 @@ export class Agent {
     }
 
     private static buildSystem(context: ChatContext): Anthropic.TextBlockParam[] {
+        const returning = context.pastParties.length > 0;
         return [
             {
                 type: 'text',
-                text: [Prompts.system, Prompts.checklist, Prompts.tools].join('\n\n'),
+                text: [
+                    Prompts.system,
+                    returning ? Prompts.knownGuest : Prompts.newGuest,
+                    Prompts.tools,
+                ].join('\n\n'),
                 cache_control: { type: 'ephemeral' },
             },
             {
@@ -191,7 +199,7 @@ export class Agent {
                 text: [
                     context.guest.lang ? Agent.LANG[context.guest.lang] : Agent.UNKNOWN_LANG,
                     `Dubai time now: ${context.now}.`,
-                    Checklist.create(context),
+                    Checklist.create(context, returning),
                 ].join('\n\n'),
             },
         ];
@@ -200,11 +208,16 @@ export class Agent {
     private static buildMessages(history: WaMessageStorage[]): Anthropic.MessageParam[] {
         const messages: Anthropic.MessageParam[] = [];
         for (const message of history) {
-            if (message.owner === 'guest') {
-                messages.push({ role: 'user', content: message.text || Agent.GUEST_MEDIA });
-            } else if (message.text) {
-                messages.push({ role: 'assistant', content: message.text });
+            const guest = message.owner === 'guest';
+            const text = guest ? message.text || Agent.GUEST_MEDIA : message.text;
+            if (!text) {
+                continue;
             }
+
+            messages.push({
+                role: guest ? 'user' : 'assistant',
+                content: `[${formatDubaiStamp(message.sent_at)}] ${text}`,
+            });
         }
 
         // API отбивает историю, которая начинается не с гостя

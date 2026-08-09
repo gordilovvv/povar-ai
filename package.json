@@ -1,9 +1,9 @@
 {
   "name": "sema-ai",
-  "version": "0.0.7",
+  "version": "0.0.9",
   "type": "module",
   "private": true,
-  "packageManager": "pnpm@11.13.0",
+  "packageManager": "pnpm@11.20.0",
   "imports": {
     "#*": {
       "development": "./src/*",
@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.107.0",
+    "@aws-sdk/client-s3": "^3.1105.0",
     "@whatwg-node/server": "^0.11.0",
     "cyrillic-to-translit-js": "^3.2.1",
     "dayjs": "^1.11.21",

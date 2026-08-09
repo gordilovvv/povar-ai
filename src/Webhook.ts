@@ -16,7 +16,7 @@ import {
 import { env } from '#environment.js';
 import { toDateTime } from '#Lib/Fmt.js';
 import { Logger } from '#Lib/Logger.js';
-import { payloadSchema } from '#Platforms/Whatsapp/Parse.js';
+import { payloadSchema, waMessageMedia } from '#Platforms/Whatsapp/Parse.js';
 import { verifySignature } from '#Platforms/Whatsapp/Signature.js';
 
 const handleVerifyWebhook: RequestHandler = (request) => {
@@ -58,6 +58,7 @@ const handleWebhook: RequestHandler = async (request) => {
     const client = await pool.connect();
     try {
         for (const message of messages) {
+            // TODO: сохранять message.from_user_id (BSUID) — обязателен с июня 2026 в связи с WhatsApp usernames
             const guest = await handleCreateGuest(
                 client,
                 message.from,
@@ -67,12 +68,23 @@ const handleWebhook: RequestHandler = async (request) => {
 
             await upsertWaChat(client, message.from, guest.id, now);
 
+            const media = waMessageMedia(message);
+            if (media) {
+                Logger.log(
+                    `[webhook] ${message.from} media type=${message.type} media_id=${media.id} mime=${media.mime_type ?? '-'} caption=${media.caption ?? '-'}`,
+                );
+            } else if (!message.text) {
+                Logger.log(
+                    `[webhook] ${message.from} unknown type=${message.type} raw=${JSON.stringify(message)}`,
+                );
+            }
+
             try {
                 await insertIncomingWaMessage(client, {
                     id: ulid(),
                     wa_message_id: message.id,
                     wa_chat_phone: message.from,
-                    text: message.text?.body ?? null,
+                    text: message.text?.body ?? media?.caption ?? null,
                     owner: 'guest',
                     status: 'delivered',
                     concurrency_version: 0,

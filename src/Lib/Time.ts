@@ -22,6 +22,22 @@ export const formatDubai = (date: Date | string, lang: Lang) => {
     return `${weekday(d, lang)} ${d.format(lang === 'en' ? 'DD.MM h:mma' : 'DD.MM HH:mm')}`;
 };
 
+export const isDubaiToday = (date: Date | string) =>
+    dayjs(date).tz(DUBAI_TZ).isSame(getDubaiTime(), 'day');
+
+export const formatDubaiStamp = (date: Date | string) => {
+    const d = dayjs(date).tz(DUBAI_TZ);
+    const days = getDubaiTime().startOf('day').diff(d.startOf('day'), 'day');
+    const time = d.format('HH:mm');
+    if (days === 0) {
+        return `today ${time}`;
+    }
+    if (days === 1) {
+        return `yesterday ${time}`;
+    }
+    return `${weekday(d, 'en')} ${d.format('DD.MM.YYYY')} ${time}`;
+};
+
 export const formatDubaiNow = () => {
     const d = getDubaiTime();
     return `${weekday(d, 'en')} ${d.format('YYYY-MM-DD HH:mm:ss')}`;

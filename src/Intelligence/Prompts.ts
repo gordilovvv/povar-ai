@@ -9,7 +9,8 @@ export class Prompts {
     private static readonly DIR = join(import.meta.dirname, 'Prompts');
 
     static readonly system = Prompts.read('system.md');
-    static readonly checklist = Prompts.read('checklist.md');
+    static readonly newGuest = Prompts.read('new-guest.md');
+    static readonly knownGuest = Prompts.read('known-guest.md');
     static readonly tools = Prompts.read('tools.md');
 
     private static read(file: string) {

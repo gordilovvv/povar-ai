@@ -1,7 +1,12 @@
 import type { PoolClient } from 'pg';
 import { type PartyGuestlistStorage, selectGuestlistByGuest } from '#Db/Guestlist.js';
 import { type GuestStorage, selectGuestByPhone, updateGuestLang } from '#Db/Guests.js';
-import { type PartyWithTimeStorage, selectActivePartiesWithTimes } from '#Db/Party.js';
+import {
+    type PartyWithTimeStorage,
+    type PastPartyStorage,
+    selectActivePartiesWithTimes,
+    selectPastPartiesByGuest,
+} from '#Db/Party.js';
 import { pool } from '#Db/Pool.js';
 import { selectWaChat, type WaChatStorage } from '#Db/WaChats.js';
 import { selectWaChatMessages, type WaMessageStorage } from '#Db/WaMessages.js';
@@ -12,11 +17,13 @@ interface ChatState {
     guest: GuestStorage;
     chat: WaChatStorage | null;
     guestlist: PartyGuestlistStorage[];
+    pastGuestlist: PartyGuestlistStorage[];
 }
 
 export interface ChatContext extends ChatState {
     messages: WaMessageStorage[];
     parties: PartyWithTimeStorage[];
+    pastParties: PastPartyStorage[];
     now: string;
 }
 
@@ -42,6 +49,7 @@ export class Context {
 
             const parties = await selectActivePartiesWithTimes(client);
             const state = await Context.loadState(client, phone, parties);
+            const pastParties = await selectPastPartiesByGuest(client, state.guest.id);
 
             if (!state.guest.lang) {
                 const lang = parseLanguage(
@@ -55,7 +63,7 @@ export class Context {
                 }
             }
 
-            return new Context(phone, messages, parties, state);
+            return new Context(phone, messages, parties, pastParties, state);
         } finally {
             client.release();
         }
@@ -65,6 +73,7 @@ export class Context {
         readonly phone: string,
         private readonly messages: WaMessageStorage[],
         private readonly parties: PartyWithTimeStorage[],
+        private readonly pastParties: PastPartyStorage[],
         private state: ChatState,
     ) {}
 
@@ -86,6 +95,7 @@ export class Context {
             ...this.state,
             messages: this.messages,
             parties: this.parties,
+            pastParties: this.pastParties,
             now: formatDubaiNow(),
         };
     }
@@ -102,9 +112,14 @@ export class Context {
 
         const chat = await selectWaChat(client, phone);
         const owned = await selectGuestlistByGuest(client, guest.id);
-        // запись прошедшей вечеринки отдала бы факты закрытой воронки — чужой стол и спутников
-        const guestlist = owned.filter((row) => parties.some((party) => party.id === row.party_id));
+        const running = (row: PartyGuestlistStorage) =>
+            parties.some((party) => party.id === row.party_id);
 
-        return { guest, chat, guestlist };
+        return {
+            guest,
+            chat,
+            guestlist: owned.filter(running),
+            pastGuestlist: owned.filter((row) => !running(row)),
+        };
     }
 }

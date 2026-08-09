@@ -35,6 +35,12 @@ export interface PartyTimeStorage {
     free_entry_before: string | null;
 }
 
+export interface PastPartyStorage {
+    id: string;
+    name: string;
+    party_start_at: string;
+}
+
 export interface PartyWithTimeStorage extends PartyStorage {
     party_start_at: string;
     free_entry_before: string | null;
@@ -48,6 +54,24 @@ export const selectActivePartiesWithTimes = async (client: PoolClient) => {
             join party_time on party_time.party_id = party.id
             where party_time.party_start_at >= now() - make_interval(hours => %L::int)
             order by party.id, party_time.party_start_at`,
+            env.PARTY_ACTIVE_HOURS,
+        ),
+    );
+    return result.rows;
+};
+
+export const selectPastPartiesByGuest = async (client: PoolClient, guestId: string) => {
+    const result = await client.query<PastPartyStorage>(
+        format(
+            `select party.id, party.name, max(party_time.party_start_at) as party_start_at
+            from party_guestlist
+            join party on party.id = party_guestlist.party_id
+            join party_time on party_time.party_id = party.id
+            where party_guestlist.guest_id = %L
+            group by party.id, party.name
+            having max(party_time.party_start_at) < now() - make_interval(hours => %L::int)
+            order by 3 desc`,
+            guestId,
             env.PARTY_ACTIVE_HOURS,
         ),
     );

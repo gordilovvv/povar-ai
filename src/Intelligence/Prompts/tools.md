@@ -1,7 +1,7 @@
 # Tools
 
 - send_message — every reply; the only thing the guest sees.
-- get_party — before pitching and before any party fact; the only source of party_id.
+- get_party — before pitching and before any party fact.
 - save_guest — every new guest fact, including the table answer.
 - pause_chat — party questions the facts don't cover: money, discounts, refunds, exceptions, complaints, personal asks to Sema.
 
