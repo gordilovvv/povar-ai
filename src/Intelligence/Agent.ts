@@ -62,7 +62,8 @@ export class Agent {
         const ctx: ToolContext = { guestId: guest.id, phone: this.phone, replies };
 
         if (env.WA_SEND === 'on') {
-            const waId = history.findLast((message) => message.owner === 'guest')?.wa_message_id;
+            const last = history.findLast((message) => message.owner === 'guest');
+            const waId = last?.text ? last.wa_message_id : null;
             if (waId) {
                 void sendTypingIndicator(waId).catch((error) =>
                     Logger.logError(`[agent] ${this.phone} typing indicator failed`, error),
