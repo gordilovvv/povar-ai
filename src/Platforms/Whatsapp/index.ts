@@ -38,11 +38,40 @@ export const sendWhatsappText = async (to: string, body: string): Promise<string
     return id;
 };
 
-export const sendWhatsappImage = async (
+export const sendWhatsappPhoto = async (
     to: string,
-    link: string,
+    bytes: Uint8Array<ArrayBuffer>,
+    mimeType: string,
     caption?: string,
 ): Promise<string> => {
+    const form = new FormData();
+    form.append('messaging_product', 'whatsapp');
+    form.append('type', mimeType);
+    form.append('file', new Blob([bytes], { type: mimeType }), 'photo');
+
+    const uploadResponse = await fetch(
+        `https://graph.facebook.com/${WA_API_VERSION}/${env.WA_PHONE_ID}/media`,
+        {
+            method: 'POST',
+            headers: { authorization: `Bearer ${env.WA_TOKEN}` },
+            body: form,
+        },
+    );
+
+    if (!uploadResponse.ok) {
+        throw new Error(
+            `WhatsApp media upload failed: ${uploadResponse.status} ${await uploadResponse.text()}`,
+        );
+    }
+
+    const uploaded = z
+        .looseObject({ id: z.string() })
+        .safeParse(await uploadResponse.json());
+    if (!uploaded.success) {
+        throw new Error('WhatsApp media upload: unexpected response shape');
+    }
+    const mediaId = uploaded.data.id;
+
     const response = await fetch(
         `https://graph.facebook.com/${WA_API_VERSION}/${env.WA_PHONE_ID}/messages`,
         {
@@ -56,7 +85,7 @@ export const sendWhatsappImage = async (
                 recipient_type: 'individual',
                 to,
                 type: 'image',
-                image: caption ? { link, caption } : { link },
+                image: caption ? { id: mediaId, caption } : { id: mediaId },
             }),
         },
     );
