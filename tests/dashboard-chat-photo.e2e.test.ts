@@ -11,7 +11,9 @@
 //             кривой ввод (нет файла, не image, >5 МБ, пустой файл, битая подпись) → 400 (в .attack)
 
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import { after, before, describe, it } from 'node:test';
+import { createServerAdapter } from '@whatwg-node/server';
 import { ulid } from 'ulid';
 import { pool as dashboardPool } from '#Dashboard/Db/Pool.js';
 import { dashboardFetch } from '#Dashboard/Router.js';
@@ -39,7 +41,7 @@ const PNG_BYTES = Buffer.from(
 
 let token = '';
 const realFetch = globalThis.fetch;
-const uploads: { mimeType: string }[] = [];
+const uploads: { mimeType: string; fileSize: number }[] = [];
 const sends: { to: string; mediaId: string; caption: string | null }[] = [];
 
 function installWaStub(): void {
@@ -56,7 +58,11 @@ function installWaStub(): void {
 
         if (url.endsWith('/media')) {
             const form = init?.body as FormData;
-            uploads.push({ mimeType: String(form.get('type')) });
+            const file = form.get('file');
+            uploads.push({
+                mimeType: String(form.get('type')),
+                fileSize: file instanceof Blob ? file.size : -1,
+            });
             return Response.json({ id: `MEDIA_E2E_${ulid()}` });
         }
         if (url.endsWith('/messages')) {
@@ -239,6 +245,40 @@ describe('e2e: dashboard chatSendPhoto + mediaGet', () => {
 
         const foreign = await getMedia('MEDIA_E2E_NOT_IN_OUR_CHATS');
         assert.equal(foreign.status, 404, 'media_id вне переписки не отдаётся');
+    });
+
+    it('загрузка по настоящему HTTP (multipart разбирает ponyfill сервера) → 200, байты целы', async () => {
+        uploads.length = 0;
+        sends.length = 0;
+        const server = createServer(createServerAdapter(dashboardFetch));
+        await new Promise<void>((resolve) => server.listen(0, resolve));
+        const address = server.address();
+        const port = typeof address === 'object' && address ? address.port : 0;
+
+        try {
+            const { result: res } = await measure('POST /chats/:phone/photo (real HTTP)', () =>
+                realFetch(`http://127.0.0.1:${port}/chats/${SEND_CHAT}/photo`, {
+                    method: 'POST',
+                    headers: { authorization: `Bearer ${token}` },
+                    body: photoForm('image/jpeg', 'по HTTP'),
+                }),
+            );
+            assert.equal(res.status, 200, 'multipart от настоящего клиента принят');
+            const body = (await res.json()) as { mediaId: string };
+
+            assert.equal(uploads.length, 1, 'ровно одна media-загрузка');
+            assert.equal(uploads[0]?.mimeType, 'image/jpeg');
+            assert.equal(uploads[0]?.fileSize, PNG_BYTES.length, 'в WA ушли все байты файла');
+            assert.equal(sends[0]?.caption, 'по HTTP');
+
+            const row = await dbOne<{ media_id: string }>(
+                `select media_id from wa_messages where media_id = $1`,
+                [body.mediaId],
+            );
+            assert.equal(row?.media_id, body.mediaId, 'сообщение записано в БД');
+        } finally {
+            await new Promise<void>((resolve) => server.close(() => resolve()));
+        }
     });
 
     it('несуществующий чат → 404, WA не дёрнут, строк нет', async () => {

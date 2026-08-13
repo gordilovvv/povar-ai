@@ -24,7 +24,13 @@ export const chatSendPhotoHandler: RequestHandler<IRequest> = async (request) =>
     }
 
     const photo = form.get('photo');
-    if (!(photo instanceof File) || photo.size === 0 || photo.size > MAX_PHOTO_BYTES) {
+    // multipart парсит ponyfill @whatwg-node, файл тут не нативный: instanceof File всегда false
+    if (
+        photo === null ||
+        typeof photo === 'string' ||
+        photo.size === 0 ||
+        photo.size > MAX_PHOTO_BYTES
+    ) {
         return badRequest();
     }
     if (!ALLOWED_MIME_TYPES.includes(photo.type)) {
@@ -54,7 +60,13 @@ export const chatSendPhotoHandler: RequestHandler<IRequest> = async (request) =>
         return notFound();
     }
 
-    const { waMessageId, mediaId } = await sendWhatsappPhoto(phone, photo, caption ?? undefined);
+    // FormData из undici принимает только нативный Blob и бросает на ponyfill-файле
+    const nativePhoto = new Blob([await photo.arrayBuffer()], { type: photo.type });
+    const { waMessageId, mediaId } = await sendWhatsappPhoto(
+        phone,
+        nativePhoto,
+        caption ?? undefined,
+    );
 
     const now = new Date();
     const writeClient = await pool.connect();
