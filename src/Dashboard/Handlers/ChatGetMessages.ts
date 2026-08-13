@@ -10,6 +10,8 @@ interface ChatMessageItem {
     owner: 'user' | 'bot';
     status: string | null;
     sentAt: string | null;
+    mediaType: string | null;
+    mediaId: string | null;
 }
 
 export const chatGetMessagesHandler: RequestHandler<IRequest> = async (request) => {
@@ -36,6 +38,8 @@ export const chatGetMessagesHandler: RequestHandler<IRequest> = async (request) 
             owner: row.owner === 'sema' ? 'bot' : 'user',
             status: row.status,
             sentAt: fromDateTime(row.sent_at),
+            mediaType: row.media_type,
+            mediaId: row.media_id,
         });
     }
 

@@ -34,6 +34,8 @@ export interface ChatMessageRow {
     owner: string;
     status: string | null;
     sent_at: string | null;
+    media_type: string | null;
+    media_id: string | null;
 }
 
 export const selectChat = async (client: PoolClient, phone: string) => {
@@ -65,7 +67,7 @@ export const selectChatMessages = async (
 ) => {
     const result = await client.query<ChatMessageRow>(
         format(
-            `select id, text, owner, status, sent_at
+            `select id, text, owner, status, sent_at, media_type, media_id
             from wa_messages
             where wa_chat_phone = %L and (%L::text is null or id < %L)
             order by id desc
@@ -81,21 +83,38 @@ export const selectChatMessages = async (
 
 export const insertOutgoingMessage = async (
     client: PoolClient,
-    message: { id: string; waMessageId: string; phone: string; text: string; sentAt: Date },
+    message: {
+        id: string;
+        waMessageId: string;
+        phone: string;
+        text: string | null;
+        sentAt: Date;
+        mediaType?: 'image';
+        mediaId?: string;
+    },
 ) => {
     await client.query(
         format(
             `insert into wa_messages
-                (id, wa_message_id, wa_chat_phone, text, owner, status, sent_at)
+                (id, wa_message_id, wa_chat_phone, text, owner, status, sent_at, media_type, media_id)
             values
-                (%L, %L, %L, %L, 'sema', 'sent', %L)`,
+                (%L, %L, %L, %L, 'sema', 'sent', %L, %L, %L)`,
             message.id,
             message.waMessageId,
             message.phone,
             message.text,
             toDateTime(message.sentAt),
+            message.mediaType ?? null,
+            message.mediaId ?? null,
         ),
     );
+};
+
+export const selectMediaIdExists = async (client: PoolClient, mediaId: string) => {
+    const result = await client.query(
+        format(`select 1 from wa_messages where media_id = %L limit 1`, mediaId),
+    );
+    return result.rows.length > 0;
 };
 
 export const updateChatLastSent = async (client: PoolClient, phone: string, sentAt: Date) => {

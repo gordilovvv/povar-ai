@@ -72,7 +72,10 @@ create table wa_messages (
     status text, -- idle | sent | delivered | read | failed
     worker_status text, -- need_processed | processing | processed | failed | skipped
     concurrency_version integer not null default 0,
-    sent_at timestamp with time zone
+    sent_at timestamp with time zone,
+    media_type text, -- image | video | audio | document | sticker
+    media_id text,
+    media_key text
 );
 
 create index if not exists wa_messages_claim
@@ -81,6 +84,10 @@ create index if not exists wa_messages_claim
 
 create index if not exists wa_messages_chat_history
     on wa_messages (wa_chat_phone, id desc);
+
+create index if not exists wa_messages_media_id
+    on wa_messages (media_id)
+    where media_id is not null;
 
 -- Dashboard
 create table dashboard_users (

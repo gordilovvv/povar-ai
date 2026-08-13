@@ -53,7 +53,31 @@ GET /chats/:phone
 ```
 GET /chats/:phone/messages
 query: limit, cursor
-item:  { id, text, owner: 'user' | 'bot', status, sentAt }[]
+item:  { id, text, owner: 'user' | 'bot', status, sentAt, mediaType, mediaId }[]
+```
+
+## chatSendPhotoHandler [x]
+
+Отправить в чат одно фото. В `wa_messages` ложится строка с `media_type='image'`, `media_id` из WA-загрузки и `text` = подпись или null. Одно фото за запрос: в Cloud API одно сообщение = один медиа-файл.
+
+```
+POST /chats/:phone/photo
+content-type: multipart/form-data
+form:  photo: File (image/jpeg|png|webp, ≤5 МБ)
+       caption: string (опционально, ≤1024 символа)
+200:   { mediaId }
+400:   не multipart / нет файла / не image / >5 МБ / кривая подпись
+404:   чат не найден
+```
+
+## mediaGetHandler [x]
+
+Отдать байты медиа по `media_id` — прокси к WhatsApp на серверном токене, чтобы админка рендерила фото. Отдаётся только медиа, засветившееся в `wa_messages`.
+
+```
+GET /media/:id
+200:  бинарь, content-type из WhatsApp
+404:  media_id не встречается в переписке либо истёк на стороне WhatsApp
 ```
 
 ## partiesGetList [x]
