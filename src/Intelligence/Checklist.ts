@@ -68,7 +68,7 @@ export class Checklist {
         let now: string;
         if (!greeted) {
             now = returning
-                ? 'greet warmly (by name if known) — a new day has begun since your last message'
+                ? "greet warmly (by name if known, the name rendered in the chat's language: latin-stored → Cyrillic in a Russian chat) — a new day has begun since your last message"
                 : 'greet + pitch (get_party)';
         } else if (!entry) {
             // питч и гест-фраза не оставляют следа в базе — были ли они, видно только по истории
