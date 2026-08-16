@@ -34,6 +34,12 @@ export const upsertWaChat = async (
     );
 };
 
+export const insertWaChat = async (client: PoolClient, waPhone: string, guestId: string) => {
+    await client.query(
+        format('insert into wa_chats (wa_phone, guest_id) values (%L, %L)', waPhone, guestId),
+    );
+};
+
 export const selectWaChat = async (client: PoolClient, waPhone: string) => {
     const result = await client.query(
         format('select * from wa_chats where wa_phone = %L', waPhone),

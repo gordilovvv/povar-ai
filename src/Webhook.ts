@@ -16,6 +16,7 @@ import {
 import { env } from '#environment.js';
 import { toDateTime } from '#Lib/Fmt.js';
 import { Logger } from '#Lib/Logger.js';
+import { Marketing } from '#Marketing.js';
 import { payloadSchema, waMessageMedia } from '#Platforms/Whatsapp/Parse.js';
 import { verifySignature } from '#Platforms/Whatsapp/Signature.js';
 
@@ -59,6 +60,10 @@ const handleWebhook: RequestHandler = async (request) => {
     try {
         for (const message of messages) {
             // TODO: сохранять message.from_user_id (BSUID) — обязателен с июня 2026 в связи с WhatsApp usernames
+            if (await Marketing.handleMessage(client, message, now)) {
+                continue;
+            }
+
             const guest = await handleCreateGuest(
                 client,
                 message.from,
@@ -147,6 +152,7 @@ const handleCreateGuest = async (
         came_at: toDateTime(now),
         lang: null,
         instagram_asked_at: null,
+        marketing_enable: true,
     };
     try {
         await insertGuest(client, created);

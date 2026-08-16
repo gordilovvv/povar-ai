@@ -7,6 +7,13 @@ export const partyTypeSchema = z.enum(['owned', 'invited']);
 
 type PartyType = z.infer<typeof partyTypeSchema>;
 
+export const marketingMessageSchema = z.object({
+    image: z.string().startsWith('s3://'),
+    message: z.string().min(1),
+});
+
+export type MarketingMessage = z.infer<typeof marketingMessageSchema>;
+
 export interface PartyStorage {
     id: string;
     name: string;
@@ -15,6 +22,7 @@ export interface PartyStorage {
     price: string | null;
     reels_url: string | null;
     notes: string | null;
+    marketing_message: unknown;
     type: PartyType;
 }
 

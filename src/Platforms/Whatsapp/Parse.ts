@@ -16,6 +16,8 @@ const messageSchema = z.looseObject({
     audio: mediaSchema.optional(),
     document: mediaSchema.optional(),
     sticker: mediaSchema.optional(),
+    // quick-reply на ШАБЛОННОМ сообщении: не interactive.button_reply, отдельный type "button"
+    button: z.looseObject({ payload: z.string(), text: z.string() }).optional(),
     referral: z.looseObject({ source_id: z.string() }).optional(),
 });
 

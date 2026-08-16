@@ -23,7 +23,7 @@ export const mediaGetHandler: RequestHandler<IRequest> = async (request) => {
         return notFound();
     }
 
-    // @TODO s3
+    // TODO: исходящие фото класть в S3 (media_key) — WA удаляет медиа через ~30 дней, дальше тут 404
     const media = await downloadWhatsappMedia(mediaId);
     if (!media) {
         return notFound();

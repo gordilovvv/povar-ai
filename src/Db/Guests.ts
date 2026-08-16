@@ -1,7 +1,7 @@
 import type { PoolClient } from 'pg';
 import format from 'pg-format';
 
-type GuestCameFrom = 'ad' | 'manual';
+type GuestCameFrom = 'ad' | 'manual' | 'party_invite';
 type GuestLang = 'ru' | 'en';
 
 export interface GuestStorage {
@@ -14,6 +14,7 @@ export interface GuestStorage {
     came_at: string | null;
     lang: GuestLang | null;
     instagram_asked_at: string | null;
+    marketing_enable: boolean;
 }
 
 export const selectGuestByPhone = async (client: PoolClient, waPhone: string) => {
@@ -27,9 +28,9 @@ export const insertGuest = async (client: PoolClient, guest: GuestStorage) => {
     await client.query(
         format(
             `insert into guests
-                (id, wa_phone, first_name, last_name, instagram, came_from, came_at, lang)
+                (id, wa_phone, first_name, last_name, instagram, came_from, came_at, lang, marketing_enable)
             values
-                (%L, %L, %L, %L, %L, %L, %L, %L)`,
+                (%L, %L, %L, %L, %L, %L, %L, %L, %L)`,
             guest.id,
             guest.wa_phone,
             guest.first_name,
@@ -38,8 +39,20 @@ export const insertGuest = async (client: PoolClient, guest: GuestStorage) => {
             guest.came_from,
             guest.came_at,
             guest.lang,
+            guest.marketing_enable,
         ),
     );
+};
+
+export const updateGuestMarketingEnableOff = async (client: PoolClient, waPhone: string) => {
+    const result = await client.query<GuestStorage>(
+        format(
+            'update guests set marketing_enable = false where wa_phone = %L and marketing_enable = true returning *',
+            waPhone,
+        ),
+    );
+
+    return result.rowCount === 1;
 };
 
 export const updateGuestLang = async (client: PoolClient, id: string, lang: GuestLang) => {

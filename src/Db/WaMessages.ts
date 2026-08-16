@@ -35,15 +35,19 @@ export interface WaMessageStorage {
     sent_at: string;
 }
 
-type WaMessageInsert = Omit<WaMessageStorage, 'sent_at'> & { sent_at: Date };
+type WaMessageInsert = Omit<WaMessageStorage, 'sent_at'> & {
+    sent_at: Date;
+    media_type?: string;
+    media_id?: string;
+};
 
 export const insertWaMessage = async (client: PoolClient, message: WaMessageInsert) => {
     await client.query(
         format(
             `insert into wa_messages
-                (id, wa_message_id, wa_chat_phone, text, owner, status, worker_status, concurrency_version, sent_at)
+                (id, wa_message_id, wa_chat_phone, text, owner, status, worker_status, concurrency_version, sent_at, media_type, media_id)
             values
-                (%L, %L, %L, %L, %L, %L, %L, %L, %L)`,
+                (%L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L)`,
             message.id,
             message.wa_message_id,
             message.wa_chat_phone,
@@ -53,6 +57,8 @@ export const insertWaMessage = async (client: PoolClient, message: WaMessageInse
             message.worker_status,
             message.concurrency_version,
             toDateTime(message.sent_at),
+            message.media_type ?? null,
+            message.media_id ?? null,
         ),
     );
 };

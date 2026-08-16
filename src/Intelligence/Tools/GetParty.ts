@@ -29,6 +29,7 @@ const handler = async (_ctx: ToolContext, raw: unknown) => {
     try {
         const rows = await selectActivePartiesWithTimes(client);
 
+        // поля перечислены поимённо: строка целиком утащила бы в промпт и новые колонки
         const parties = new Map<
             string,
             {

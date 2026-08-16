@@ -9,6 +9,7 @@ import {
 } from '#Db/Party.js';
 import { pool } from '#Db/Pool.js';
 import { selectWaChat, type WaChatStorage } from '#Db/WaChats.js';
+import { selectWaMarketingSends, type WaMarketingSendStorage } from '#Db/WaMarketingSends.js';
 import { selectWaChatMessages, type WaMessageStorage } from '#Db/WaMessages.js';
 import { parseLanguage } from '#Lib/Lang.js';
 import { formatDubaiNow } from '#Lib/Time.js';
@@ -18,6 +19,7 @@ interface ChatState {
     chat: WaChatStorage | null;
     guestlist: PartyGuestlistStorage[];
     pastGuestlist: PartyGuestlistStorage[];
+    marketingSends: WaMarketingSendStorage[];
 }
 
 export interface ChatContext extends ChatState {
@@ -112,6 +114,7 @@ export class Context {
 
         const chat = await selectWaChat(client, phone);
         const owned = await selectGuestlistByGuest(client, guest.id);
+        const marketingSends = await selectWaMarketingSends(client, phone);
         const running = (row: PartyGuestlistStorage) =>
             parties.some((party) => party.id === row.party_id);
 
@@ -120,6 +123,7 @@ export class Context {
             chat,
             guestlist: owned.filter(running),
             pastGuestlist: owned.filter((row) => !running(row)),
+            marketingSends,
         };
     }
 }

@@ -46,6 +46,11 @@ export class Checklist {
             `parties running: ${Checklist.field(Checklist.running(parties))}`,
         ];
 
+        const invite = Checklist.invite(context);
+        if (invite) {
+            state.push(`invite: ${invite}`);
+        }
+
         const done: string[] = returning ? ['get the name', 'ask for the instagram'] : [];
         if (greeted) {
             done.push('greet');
@@ -106,6 +111,26 @@ export class Checklist {
             );
         }
         return lines.join('\n');
+    }
+
+    /** Приглашение — факт чата, а не гостя: came_from повторному гостю рассылка не меняет. */
+    private static invite(context: ChatContext): string | null {
+        if (!context.messages.some((message) => message.owner === 'marketing')) {
+            return null;
+        }
+        const sent = context.marketingSends.filter((row) =>
+            context.parties.some((party) => party.id === row.party_id),
+        );
+        if (!sent.length) {
+            return 'the guest got the broadcast invite template and is writing back to it — do not open from scratch';
+        }
+        const names = sent
+            .map((row) => {
+                const name = context.parties.find((party) => party.id === row.party_id)?.name;
+                return `${name} (party_id: ${row.party_id})`;
+            })
+            .join(', ');
+        return `the guest got the broadcast invite and the full details for ${names} — they are already in their hands, do not pitch it from scratch, take them to the guestlist`;
     }
 
     /** Вечеринка идёт строкой на каждое время старта — в блок она попадает один раз. */

@@ -44,6 +44,12 @@ export const sendWhatsappPhoto = async (
     photo: Blob,
     caption?: string,
 ): Promise<{ waMessageId: string; mediaId: string }> => {
+    const mediaId = await uploadWhatsappPhoto(photo);
+    const waMessageId = await sendWhatsappPhotoByMediaId(to, mediaId, caption);
+    return { waMessageId, mediaId };
+};
+
+export const uploadWhatsappPhoto = async (photo: Blob): Promise<string> => {
     const form = new FormData();
     form.append('messaging_product', 'whatsapp');
     form.append('type', photo.type);
@@ -68,15 +74,19 @@ export const sendWhatsappPhoto = async (
     if (!uploaded.success) {
         throw new Error('WhatsApp media upload: unexpected response shape');
     }
-    const mediaId = uploaded.data.id;
+    return uploaded.data.id;
+};
 
-    const waMessageId = await postWhatsappMessage({
+export const sendWhatsappPhotoByMediaId = async (
+    to: string,
+    mediaId: string,
+    caption?: string,
+): Promise<string> =>
+    postWhatsappMessage({
         to,
         type: 'image',
         image: caption ? { id: mediaId, caption } : { id: mediaId },
     });
-    return { waMessageId, mediaId };
-};
 
 const mediaMetaSchema = z.looseObject({ url: z.string(), mime_type: z.string() });
 // На исчезнувшее медиа Graph отвечает не 404, а 400 с этим кодом — «объекта не существует».

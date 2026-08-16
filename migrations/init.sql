@@ -6,7 +6,8 @@ create table party (
     location text not null,
     google_map_link text,
     reels_url text,
-    notes text
+    notes text,
+    marketing_message jsonb -- { image, message }
 );
 
 create table party_ads (
@@ -34,9 +35,10 @@ create table guests (
     last_name text,
     instagram text,
     instagram_asked_at timestamp with time zone,
-    came_from text, -- ad | manual
+    came_from text, -- ad | manual | party_invite
     came_at timestamp with time zone,
-    lang text
+    lang text,
+    marketing_enable boolean not null default true
 );
 
 create table party_guestlist (
@@ -60,7 +62,8 @@ create table wa_chats (
     last_sent_message_at timestamp with time zone,
     last_received_message_at timestamp with time zone,
     paused_at timestamp with time zone,
-    pause_details text
+    pause_details text,
+    pause_alerted_at timestamp with time zone
 );
 
 create table wa_messages (
@@ -88,6 +91,16 @@ create index if not exists wa_messages_chat_history
 create index if not exists wa_messages_media_id
     on wa_messages (media_id)
     where media_id is not null;
+
+create table wa_marketing_sends (
+    party_id text not null references party (id),
+    wa_phone text not null,
+    primary key (party_id, wa_phone),
+    sent_at timestamp with time zone
+);
+
+create index if not exists wa_marketing_sends_phone
+    on wa_marketing_sends (wa_phone);
 
 -- Dashboard
 create table dashboard_users (
