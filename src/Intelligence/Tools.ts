@@ -1,13 +1,12 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
-import getParty from '#Intelligence/Tools/GetParty.js';
 import pauseChat from '#Intelligence/Tools/PauseChat.js';
 import saveGuest from '#Intelligence/Tools/SaveGuest.js';
 import sendMessage from '#Intelligence/Tools/SendMessage.js';
 import type { AgentTool, ToolContext } from '#Lib/Tools.js';
 
 export class Tools {
-    private static readonly BUILTIN: AgentTool[] = [sendMessage, getParty, pauseChat, saveGuest];
+    private static readonly BUILTIN: AgentTool[] = [sendMessage, pauseChat, saveGuest];
 
     private readonly byName: Map<string, AgentTool>;
     private readonly toolDefs: Anthropic.Tool[];

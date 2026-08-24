@@ -4,6 +4,7 @@ import type { WaMessageStorage } from '#Db/WaMessages.js';
 import { env } from '#environment.js';
 import { Checklist } from '#Intelligence/Checklist.js';
 import { type ChatContext, Context } from '#Intelligence/Context.js';
+import { Parties } from '#Intelligence/Parties.js';
 import { Prompts } from '#Intelligence/Prompts.js';
 import { Tools } from '#Intelligence/Tools.js';
 import { Logger } from '#Lib/Logger.js';
@@ -23,19 +24,12 @@ export class Agent {
     // thinking ест из MAX_TOKENS: лимит должен оставлять запас на сам ответ
     private static readonly MAX_TOKENS = 8192;
 
-    private static readonly LANG = {
-        en: 'The guest writes in ENGLISH — reply ONLY in English.',
-        ru: 'The guest writes in RUSSIAN — reply in Russian.',
-    };
-    private static readonly UNKNOWN_LANG = 'Reply in the language the guest writes in.';
-    private static readonly GUEST_MEDIA = '(the guest sent media)';
-    private static readonly NUDGE =
-        '(internal harness note, NOT from the guest — they have received nothing this turn. Call send_message now with your reply, or the required tool. Never mention this note, system commands or anything internal to the guest.)';
     /** Тул сам ответил гостю и запретил писать поверх: под это страховки обязаны молчать. */
     private static readonly REPLY_FORBIDDEN = z.union([
         z.object({ ok: z.literal(true), instruction: z.string() }),
         z.object({ error: z.literal('chat_paused') }),
     ]);
+    private static readonly OK = z.object({ ok: z.literal(true) });
 
     constructor(
         readonly phone: string,
@@ -113,9 +107,13 @@ export class Agent {
 
             if (toolUses.length) {
                 const results: Anthropic.ToolResultBlockParam[] = [];
+                let everyToolSucceeded = true;
+                let replySent = false;
                 for (const toolUse of toolUses) {
                     const output = await Agent.tools.run(toolUse.name, toolUse.input, ctx);
                     replyForbidden ||= Agent.REPLY_FORBIDDEN.safeParse(output).success;
+                    everyToolSucceeded &&= Agent.OK.safeParse(output).success;
+                    replySent ||= toolUse.name === 'send_message';
                     Logger.log(
                         `[agent] ${this.phone} tool ${toolUse.name} → ${JSON.stringify(output)}`,
                     );
@@ -125,7 +123,10 @@ export class Agent {
                         content: JSON.stringify(output),
                     });
                 }
-                // все результаты одним сообщением: разбиение отучает модель от параллельных вызовов
+                // ответ ушёл и все тулы отработали — модели нечего добавить; ошибку она должна увидеть
+                if ((replySent && everyToolSucceeded) || replyForbidden) {
+                    break;
+                }
                 messages.push({ role: 'user', content: results });
                 await context.refresh();
                 continue;
@@ -154,7 +155,11 @@ export class Agent {
                 break;
             }
             nudged = true;
-            messages.push({ role: 'user', content: Agent.NUDGE });
+            messages.push({
+                role: 'user',
+                content:
+                    '(internal harness note, NOT from the guest — they have received nothing this turn. Call send_message now with your reply, or the required tool. Never mention this note, system commands or anything internal to the guest.)',
+            });
         }
 
         if (!ctx.replies.length && !replyForbidden) {
@@ -169,6 +174,11 @@ export class Agent {
 
     private static buildSystem(context: ChatContext): Anthropic.TextBlockParam[] {
         const returning = context.pastParties.length > 0;
+        const lang = context.guest.lang;
+        const langLine = {
+            en: 'The guest writes in ENGLISH — reply ONLY in English.',
+            ru: 'The guest writes in RUSSIAN — reply in Russian.',
+        };
         return [
             {
                 type: 'text',
@@ -176,13 +186,14 @@ export class Agent {
                     Prompts.system,
                     returning ? Prompts.knownGuest : Prompts.newGuest,
                     Prompts.tools,
+                    Parties.block(context.parties, lang ?? 'en'),
                 ].join('\n\n'),
                 cache_control: { type: 'ephemeral' },
             },
             {
                 type: 'text',
                 text: [
-                    context.guest.lang ? Agent.LANG[context.guest.lang] : Agent.UNKNOWN_LANG,
+                    lang ? langLine[lang] : 'Reply in the language the guest writes in.',
                     `Dubai time now: ${context.now}.`,
                     Checklist.create(context, returning),
                 ].join('\n\n'),
@@ -194,7 +205,7 @@ export class Agent {
         const messages: Anthropic.MessageParam[] = [];
         for (const message of history) {
             const guest = message.owner === 'guest';
-            const text = guest ? message.text || Agent.GUEST_MEDIA : message.text;
+            const text = guest ? message.text || '(the guest sent media)' : message.text;
             if (!text) {
                 continue;
             }

@@ -1,5 +1,4 @@
 import type { PartyGuestlistStorage } from '#Db/Guestlist.js';
-import type { PartyWithTimeStorage } from '#Db/Party.js';
 import type { ChatContext } from '#Intelligence/Context.js';
 import { formatDubai, isDubaiToday } from '#Lib/Time.js';
 
@@ -43,7 +42,6 @@ export class Checklist {
             `guestlist: ${Checklist.field(party)}`,
             `table: ${table}`,
             `friends: ${Checklist.field(entry?.friends?.join(', '))}`,
-            `parties running: ${Checklist.field(Checklist.running(parties))}`,
         ];
 
         const invite = Checklist.invite(context);
@@ -74,7 +72,7 @@ export class Checklist {
         if (!greeted) {
             now = returning
                 ? "greet warmly (by name if known, the name rendered in the chat's language: latin-stored → Cyrillic in a Russian chat) — a new day has begun since your last message"
-                : 'greet + pitch (get_party)';
+                : 'greet + pitch';
         } else if (!entry) {
             // питч и гест-фраза не оставляют следа в базе — были ли они, видно только по истории
             now = returning
@@ -131,15 +129,6 @@ export class Checklist {
             })
             .join(', ');
         return `the guest got the broadcast invite and the full details for ${names} — they are already in their hands, do not pitch it from scratch, take them to the guestlist`;
-    }
-
-    /** Вечеринка идёт строкой на каждое время старта — в блок она попадает один раз. */
-    private static running(parties: PartyWithTimeStorage[]): string {
-        const seen = new Map<string, string>();
-        for (const party of parties) {
-            seen.set(party.id, `${party.name} (party_id: ${party.id})`);
-        }
-        return [...seen.values()].join(', ');
     }
 
     private static pastTable(entry: PartyGuestlistStorage | undefined): string {
