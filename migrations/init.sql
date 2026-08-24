@@ -10,11 +10,6 @@ create table party (
     marketing_message jsonb -- { image, message }
 );
 
-create table party_ads (
-    party_id text not null references party (id),
-    source_ad_id text not null
-);
-
 create table party_tables (
     party_id text not null references party (id),
     prices jsonb,

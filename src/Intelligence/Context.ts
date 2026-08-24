@@ -38,16 +38,8 @@ export class Context {
             const messages = await selectWaChatMessages(
                 client,
                 phone,
-                null,
                 Context.MESSAGES_HISTORY_LIMIT,
             );
-            // запрос отдаёт последние N по id: порядок хода — по sent_at, id разводит одну секунду
-            messages.sort((a, b) => {
-                // pg отдаёт timestamptz как Date: `===` сравнивает ссылки и тай-брейк по id никогда не срабатывает
-                const left = new Date(a.sent_at).getTime();
-                const right = new Date(b.sent_at).getTime();
-                return left !== right ? left - right : a.id < b.id ? -1 : 1;
-            });
 
             const parties = await selectActivePartiesWithTimes(client);
             const state = await Context.loadState(client, phone, parties);

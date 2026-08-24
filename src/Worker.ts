@@ -14,7 +14,7 @@ import { sleep } from '#Lib/Sleep.js';
 
 const CHATS_LIMIT = 3;
 const POLL_INTERVAL_MS = 1_000;
-const BEFORE_REPLY_WINDOW_MS = 5_000;
+const BEFORE_REPLY_WINDOW_MS = 10_000;
 
 let running = false;
 

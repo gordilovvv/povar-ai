@@ -70,6 +70,7 @@ const seed = async () => {
             came_at: toDateTime(new Date()),
             lang: null,
             instagram_asked_at: null,
+            marketing_enable: true,
         });
         const guestId = (await client.query('select id from guests where wa_phone = $1', [phone]))
             .rows[0].id;

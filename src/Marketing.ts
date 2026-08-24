@@ -53,6 +53,7 @@ export class Marketing {
         return false;
     }
 
+    // @TODO сделать так, чтобы рассылку без сообщения запустить было нельзя
     private static async sendMarketingMessage(
         party: PartyWithTimeStorage,
         phone: string,

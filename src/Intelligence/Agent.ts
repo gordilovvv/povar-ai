@@ -5,7 +5,6 @@ import { env } from '#environment.js';
 import { Checklist } from '#Intelligence/Checklist.js';
 import { type ChatContext, Context } from '#Intelligence/Context.js';
 import { Prompts } from '#Intelligence/Prompts.js';
-import sendMessage from '#Intelligence/Tools/SendMessage.js';
 import { Tools } from '#Intelligence/Tools.js';
 import { Logger } from '#Lib/Logger.js';
 import { formatDubaiStamp } from '#Lib/Time.js';
@@ -29,15 +28,9 @@ export class Agent {
         ru: 'The guest writes in RUSSIAN — reply in Russian.',
     };
     private static readonly UNKNOWN_LANG = 'Reply in the language the guest writes in.';
-    private static readonly SILENT_GUEST =
-        '(the guest is silent — open the dialog with a warm greeting)';
     private static readonly GUEST_MEDIA = '(the guest sent media)';
     private static readonly NUDGE =
         '(internal harness note, NOT from the guest — they have received nothing this turn. Call send_message now with your reply, or the required tool. Never mention this note, system commands or anything internal to the guest.)';
-    /** Голый текст с этими маркерами — мета-рассуждение модели, гостю не пересылаем. */
-    private static readonly META_TEXT =
-        /инструкц|системн|внутренн|не буду отвечать|internal|harness|instruction/i;
-
     /** Тул сам ответил гостю и запретил писать поверх: под это страховки обязаны молчать. */
     private static readonly REPLY_FORBIDDEN = z.union([
         z.object({ ok: z.literal(true), instruction: z.string() }),
@@ -148,21 +141,12 @@ export class Agent {
                 break;
             }
 
-            const bubbles = response.content.flatMap((block) =>
-                block.type === 'text'
-                    ? block.text
-                          .split('\n')
-                          .map((line) => line.trim())
-                          .filter(Boolean)
-                    : [],
-            );
-            if (bubbles.length) {
-                if (!Agent.META_TEXT.test(bubbles.join('\n'))) {
-                    await Agent.tools.run(sendMessage.name, { texts: bubbles }, ctx);
-                    break;
-                }
+            const text = response.content
+                .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+                .join(' | ');
+            if (text) {
                 Logger.logError(
-                    `[agent] ${this.phone} step ${step} meta text caught, not sent: ${bubbles.join(' | ')}`,
+                    `[agent] ${this.phone} step ${step} text outside tool, not sent: ${text}`,
                 );
             }
 
@@ -225,10 +209,6 @@ export class Agent {
         while (messages.length && messages[0]?.role !== 'user') {
             messages.shift();
         }
-        if (messages.at(-1)?.role !== 'user') {
-            messages.push({ role: 'user', content: Agent.SILENT_GUEST });
-        }
-
         return messages;
     }
 }

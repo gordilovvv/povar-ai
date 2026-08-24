@@ -118,19 +118,24 @@ export const updateWaMessageStatus = async (
     return result.rows.length ? result.rows[0] : null;
 };
 
+/** Захваченный батч (`processing`) идёт последним, даже если по времени раньше нашего ответа. */
 export const selectWaChatMessages = async (
     client: PoolClient,
     waChatPhone: string,
-    lastId: string | null,
     limit: number,
 ) => {
     const result = await client.query<WaMessageStorage>(
         format(
-            'select * from wa_messages where wa_chat_phone = %L and (%L::text is null or id < %L) order by id desc limit %L',
+            `select * from (
+                select * from wa_messages
+                where wa_chat_phone = %L and worker_status is distinct from %L
+                order by id desc limit %L
+            ) history
+            order by worker_status is not distinct from %L, sent_at, id`,
             waChatPhone,
-            lastId,
-            lastId,
+            waWorkerStatusSchema.enum.need_processed,
             limit,
+            waWorkerStatusSchema.enum.processing,
         ),
     );
     return result.rows;

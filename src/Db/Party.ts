@@ -32,11 +32,6 @@ export interface PartyTablesStorage {
     map: string | null;
 }
 
-export interface PartyAdStorage {
-    party_id: string;
-    source_ad_id: string;
-}
-
 export interface PartyTimeStorage {
     party_id: string;
     party_start_at: string;
@@ -89,19 +84,6 @@ export const selectPastPartiesByGuest = async (client: PoolClient, guestId: stri
 export const selectPartyTables = async (client: PoolClient, partyId: string) => {
     const result = await client.query<PartyTablesStorage>(
         format(`select * from party_tables where party_id = %L`, partyId),
-    );
-    return result.rows.length ? result.rows[0] : null;
-};
-
-export const selectPartyByAd = async (client: PoolClient, sourceAdId: string) => {
-    const result = await client.query<PartyStorage>(
-        format(
-            `select party.*
-            from party
-            join party_ads on party_ads.party_id = party.id
-            where party_ads.source_ad_id = %L`,
-            sourceAdId,
-        ),
     );
     return result.rows.length ? result.rows[0] : null;
 };
