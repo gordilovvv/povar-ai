@@ -56,7 +56,6 @@ export const selectActivePartiesWithTimes = async (client: PoolClient) => {
             from party
             join party_time on party_time.party_id = party.id
             where party_time.party_start_at >= now() - make_interval(hours => %L::int)
-              and party_time.party_start_at < (date_trunc('week', now() at time zone 'Asia/Dubai') + interval '7 days') at time zone 'Asia/Dubai'
             order by party.id, party_time.party_start_at`,
             env.PARTY_ACTIVE_HOURS,
         ),

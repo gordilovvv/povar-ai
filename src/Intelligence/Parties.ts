@@ -2,10 +2,6 @@ import type { PartyWithTimeStorage } from '#Db/Party.js';
 import type { Lang } from '#Lib/Lang.js';
 import { formatDubai } from '#Lib/Time.js';
 
-/**
- * Блок вечеринок для system-промта. Набор — selectActivePartiesWithTimes: только текущая
- * неделя по Дубаю (пн–вс), старт не раньше now() − PARTY_ACTIVE_HOURS; заведённое наперёд не попадает.
- */
 export class Parties {
     private static readonly HEADER =
         "<parties>\nEvery party currently running, one <party> each. type: owned means Sema's own party, invited means he plays there as a guest DJ — the pitch wording depends on it. when lists the upcoming starts with their free-entry cutoff, already in Dubai time and in the guest's format. party_id is the id for save_guest. A missing field is genuinely unknown. No <party> at all → no party is open, say so.";
