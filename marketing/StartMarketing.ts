@@ -1,5 +1,6 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline/promises';
 import dayjs from 'dayjs';
 import timezone from 'dayjs/plugin/timezone.js';
 import utc from 'dayjs/plugin/utc.js';
@@ -14,7 +15,7 @@ import {
 } from '#Db/Guests.js';
 import { marketingMessageSchema, selectActivePartiesWithTimes } from '#Db/Party.js';
 import { pool, UNIQUE_ERROR_CODE } from '#Db/Pool.js';
-import { insertWaChat, selectWaChat, updateWaChatLastSent } from '#Db/WaChats.js';
+import { insertWaChat, updateWaChatLastSent } from '#Db/WaChats.js';
 import {
     insertWaMessage,
     waMessageOwnerSchema,
@@ -29,8 +30,10 @@ import { Progress } from './Progress.js';
 import {
     appendCheckpoint,
     BOLD,
+    CYAN,
     fmtMmSs,
     GRAY,
+    GREEN,
     normalizePhone,
     RED,
     RESET,
@@ -42,73 +45,91 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const DUBAI_TZ = 'Asia/Dubai';
-const LIVE_CHAT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const LIVE_CHAT_WINDOW_HOURS = 24;
 const SEND_INTERVAL_MS = 1000;
-const SEND_LIMIT = 250;
+const SEND_LIMIT = 2000;
 const MESSAGING_LIMIT_WINDOW_HOURS = 24;
 const WA_API_VERSION = 'v21.0';
 const TEMPLATE_NAME = 'party_invite';
 const SEND_MAX_ATTEMPTS = 4;
+const TEST_PHONE = '79287546885';
+const TEST_PAUSE_MS = 30_000;
 const BACKOFF_BASE_MS = 5_000;
+const NETWORK_RETRY_MS = 15_000;
 const TEMPORARY_ERROR_CODES = new Set([80007, 130429, 131056]);
 const SPAM_RESTRICTION_ERROR_CODE = 131048;
 const MARKETING_OPT_OUT_ERROR_CODE = 131050;
+const TMP_DIR = join(import.meta.dirname, 'tmp');
 
 const sendResponseSchema = z.looseObject({
     messages: z.array(z.looseObject({ id: z.string() })).min(1),
 });
 const graphErrorSchema = z.looseObject({ error: z.looseObject({ code: z.number() }) });
+const audienceRowSchema = z.object({ phone: z.string(), skip: z.string().nullable() });
+const SKIP_LABELS: Record<string, string> = {
+    'no marketing consent': 'отписались от рассылок',
+    'in guestlist': 'уже в гест-листе',
+    paused: 'чат на паузе',
+    'live chat': `переписывались с ботом за последние ${LIVE_CHAT_WINDOW_HOURS} ч`,
+    'in checkpoint': 'уже получили в прошлые запуски',
+};
 
-const [partyId, numbersPath] = process.argv.slice(2);
-if (!partyId || !numbersPath) {
+const [partyId, ...numbersPaths] = process.argv.slice(2);
+if (!partyId) {
     console.error(
-        `${RED}usage: pnpm exec tsx --conditions=development --env-file=.env.prod marketing/StartMarketing.ts <party_id> <numbers-file>${RESET}`,
+        `${RED}Как запускать: pnpm exec tsx --conditions=development --env-file=.env.prod marketing/StartMarketing.ts <party_id> [файл-с-номерами ...]${RESET}`,
     );
     process.exit(1);
 }
-if (!existsSync(numbersPath)) {
-    console.error(`${RED}fatal: numbers file not found: ${numbersPath}${RESET}`);
-    process.exit(1);
+for (const path of numbersPaths) {
+    if (!existsSync(path)) {
+        console.error(`${RED}Стоп: файл с номерами не найден — ${path}${RESET}`);
+        process.exit(1);
+    }
 }
 if (env.WA_SEND !== 'on') {
-    console.error(`${RED}fatal: WA_SEND is off, refusing to run${RESET}`);
+    console.error(`${RED}Стоп: отправка выключена (WA_SEND ≠ on) — рассылка не запущена${RESET}`);
     process.exit(1);
 }
 
-const checkpointPath = join(import.meta.dirname, `.marketing-${partyId}.state`);
+// 1. Party, marketing message and poster, 24h send budget.
+const checkpointPath = join(TMP_DIR, `${partyId}.state`);
+const audiencePath = join(TMP_DIR, `${partyId}.list.txt`);
 const checkpoint = readCheckpoint(checkpointPath);
 
 const client = await pool.connect();
 
 const party = (await selectActivePartiesWithTimes(client)).find((row) => row.id === partyId);
 if (!party) {
-    console.error(`${RED}fatal: active party not found: ${partyId}${RESET}`);
+    console.error(
+        `${RED}Стоп: активная вечеринка ${partyId} не найдена — проверь party_id и дату${RESET}`,
+    );
     process.exit(1);
 }
 const marketingMessage = marketingMessageSchema.safeParse(party.marketing_message);
 if (!marketingMessage.success) {
     console.error(
-        `${RED}fatal: party.marketing_message is missing or invalid for ${partyId} — fill it before the broadcast${RESET}`,
+        `${RED}Стоп: у вечеринки ${partyId} не заполнен marketing_message (афиша + текст) — заполни его до рассылки${RESET}`,
     );
     console.error(marketingMessage.error.message);
     process.exit(1);
 }
-const marketingImage = await downloadFromS3(marketingMessage.data.image).catch(
-    (error: Error) => error,
-);
-if (marketingImage instanceof Error) {
+const marketingMedia =
+    'video' in marketingMessage.data ? marketingMessage.data.video : marketingMessage.data.image;
+const marketingFile = await downloadFromS3(marketingMedia).catch((error: Error) => error);
+if (marketingFile instanceof Error) {
     console.error(
-        `${RED}fatal: marketing image ${marketingMessage.data.image} is not readable — ${marketingImage.message}${RESET}`,
+        `${RED}Стоп: афиша ${marketingMedia} не читается из S3 — ${marketingFile.message}${RESET}`,
     );
     process.exit(1);
 }
 
 const partyDate = dayjs(party.party_start_at).tz(DUBAI_TZ).format('MMMM D (dddd)');
 const partyVenue = party.location.split(',')[0]?.trim() ?? party.location;
-console.log(`${BOLD}broadcast ${partyId}${RESET}`);
-console.log(`party: ${party.name} | ${partyDate} | ${partyVenue}`);
+console.log(`\n${BOLD}${CYAN}═══ Рассылка приглашений: ${partyId} ═══${RESET}`);
+console.log(`${BOLD}Вечеринка:${RESET} ${party.name} — ${partyDate}, ${partyVenue}`);
 console.log(
-    `marketing image: ${marketingMessage.data.image} ${marketingImage.type} ${Math.round(marketingImage.size / 1024)}KB`,
+    `${BOLD}Афиша:${RESET} ${marketingMedia} (${marketingFile.type}, ${Math.round(marketingFile.size / 1024)} КБ) — уйдёт по кнопке Info`,
 );
 
 const usage = await client.query(
@@ -121,94 +142,200 @@ const usage = await client.query(
     ),
 );
 const recipientsLast24h = z.number().parse(usage.rows[0]?.recipients);
-const sendBudget = SEND_LIMIT - recipientsLast24h;
+let sendBudget = Math.max(SEND_LIMIT - recipientsLast24h, 0);
 console.log(
-    `messaging tier: ${SEND_LIMIT}/24h (hardcoded), used ${recipientsLast24h}, budget ${sendBudget}`,
+    `${BOLD}Лимит WhatsApp:${RESET} ${SEND_LIMIT} получателей за 24 ч, уже использовано ${recipientsLast24h} → по расчёту можно отправить ${GREEN}${sendBudget}${RESET}`,
 );
+
+const templateText = `Hi, it's Sam Povar ✌️\n\nI'm throwing a party this week — ${partyDate} at ${partyVenue}.\n\nI'd love to see you there! Sign up for the guest list below.`;
+console.log(
+    `${GRAY}Шаблон ${TEMPLATE_NAME}/en, подстановки: [${partyDate}] [${partyVenue}], кнопка Info → ${partyId}${RESET}`,
+);
+
+// 2. Audience: guests from DB not in this guestlist, plus numbers files, deduplicated.
+const dbBase = await client.query(
+    format(
+        `select guests.wa_phone as phone
+        from guests
+        where guests.wa_phone is not null
+          and guests.marketing_enable
+          and not exists (
+              select 1 from party_guestlist
+              where party_guestlist.party_id = %L and party_guestlist.guest_id = guests.id
+          )`,
+        partyId,
+    ),
+);
+const phones = new Set<string>(z.array(z.string()).parse(dbBase.rows.map((row) => row.phone)));
+console.log(`\n${BOLD}${CYAN}── Собираю аудиторию ──${RESET}`);
+console.log(
+    `  Из базы: ${GREEN}${phones.size}${RESET} гостей с согласием на рассылку, которых ещё нет в гест-листе ${partyId}`,
+);
+for (const path of numbersPaths) {
+    let fresh = 0;
+    let duplicates = 0;
+    for (const line of readFileSync(path, 'utf8').split('\n')) {
+        // Берём только номер в начале строки; имя и всё после него отбрасываем
+        const raw = line.replace(/[^\d\s+().-].*$/u, '').trim();
+        if (raw === '') {
+            continue;
+        }
+        const phone = normalizePhone(raw);
+        if (phone === null) {
+            console.error(
+                `${RED}Стоп: в файле ${path} строка не похожа на номер — «${line}»${RESET}`,
+            );
+            process.exit(1);
+        }
+        if (phones.has(phone)) {
+            duplicates++;
+        } else {
+            phones.add(phone);
+            fresh++;
+        }
+    }
+    console.log(
+        `  Файл ${path}: ${GREEN}+${fresh}${RESET} новых номеров, ${YELLOW}${duplicates}${RESET} дублей отброшено`,
+    );
+}
+
+// 3. Skip rules in one query: consent, guestlist, paused, live chat; then checkpoint.
+const audience = await client.query(
+    format(
+        `select
+            numbers.phone,
+            case
+                when guests.marketing_enable = false then 'no marketing consent'
+                when party_guestlist.guest_id is not null then 'in guestlist'
+                when wa_chats.paused_at is not null then 'paused'
+                when wa_chats.last_received_message_at > now() - make_interval(hours => %L::int)
+                    then 'live chat'
+            end as skip
+        from unnest(array[%L]::text[]) as numbers(phone)
+        left join guests on guests.wa_phone = numbers.phone
+        left join party_guestlist
+            on party_guestlist.party_id = %L and party_guestlist.guest_id = guests.id
+        left join wa_chats on wa_chats.wa_phone = numbers.phone`,
+        LIVE_CHAT_WINDOW_HOURS,
+        [...phones],
+        partyId,
+    ),
+);
+const audienceRows = z
+    .array(audienceRowSchema)
+    .parse(audience.rows)
+    .map((row) => ({
+        ...row,
+        skip: row.skip ?? (checkpoint.has(row.phone) ? 'in checkpoint' : null),
+    }));
+const groups = Object.groupBy(audienceRows, (row) => row.skip ?? 'send');
+const toSend = (groups.send ?? []).map((row) => row.phone).filter((phone) => phone !== TEST_PHONE);
+writeFileSync(
+    audiencePath,
+    `${audienceRows.map((row) => `${row.phone}\t${row.skip ?? 'send'}`).join('\n')}\n`,
+);
+console.log(`  Итого уникальных номеров: ${BOLD}${phones.size}${RESET}`);
+console.log(`  Полный список с пометками записан в ${GRAY}${audiencePath}${RESET}`);
+for (const [reason, rows] of Object.entries(groups)) {
+    if (reason !== 'send') {
+        console.log(
+            `  ${YELLOW}Пропускаю${RESET} ${SKIP_LABELS[reason] ?? reason}: ${YELLOW}${rows?.length ?? 0}${RESET}`,
+        );
+    }
+}
+console.log(
+    `\n${BOLD}План:${RESET} к отправке ${GREEN}${toSend.length}${RESET}, лимит на сегодня ${sendBudget} → ${BOLD}в этот запуск уйдёт ${Math.min(toSend.length, sendBudget)}${RESET}`,
+);
+if (toSend.length === 0) {
+    console.log(
+        `${YELLOW}Отправлять некого — всем либо уже отправлено, либо они пропущены${RESET}`,
+    );
+    process.exit(0);
+}
+
+// 4. Summary is on screen and in tmp/<party>.list.txt — nothing is sent without "yes".
+const readline = createInterface({ input: process.stdin, output: process.stdout });
+readline.on('SIGINT', () => {
+    console.log(`\n${YELLOW}Отменено (Ctrl+C), ничего не отправлено${RESET}`);
+    process.exit(0);
+});
+const answer = await readline.question(
+    `\n${BOLD}Начать рассылку? Введи ${GREEN}yes${RESET}${BOLD}, всё остальное = отмена: ${RESET}`,
+);
+if (answer.trim() !== 'yes') {
+    readline.close();
+    console.log(`${YELLOW}Отменено, ничего не отправлено${RESET}`);
+    process.exit(0);
+}
+if (recipientsLast24h > 0) {
+    const override = await readline.question(
+        `${YELLOW}За последние ${MESSAGING_LIMIT_WINDOW_HOURS} ч уже отправлено ${recipientsLast24h} — по расчёту доступно ${sendBudget}. Возможно, окно WhatsApp уже сброшено.${RESET}\n${BOLD}Снять ограничение и слать до ${SEND_LIMIT}? Введи ${GREEN}yes${RESET}${BOLD}, всё остальное = оставить расчётный лимит: ${RESET}`,
+    );
+    if (override.trim() === 'yes') {
+        sendBudget = SEND_LIMIT;
+        console.log(`${YELLOW}Лимит снят: в этот запуск уйдёт до ${sendBudget}${RESET}`);
+    }
+}
+readline.close();
 if (sendBudget <= 0) {
     console.error(
-        `${RED}fatal: 24h messaging limit spent (${recipientsLast24h}/${SEND_LIMIT})${RESET}`,
+        `${RED}Стоп: суточный лимит исчерпан (${recipientsLast24h}/${SEND_LIMIT}) — запусти позже${RESET}`,
     );
     process.exit(1);
 }
 
-const templateText = `Hi, it's Sam Povar ✌️\n\nI'm throwing a party this week — ${partyDate} at ${partyVenue}.\n\nI'd love to see you there! Sign up for the guest list below.`;
+console.log(`\n${BOLD}${CYAN}── Тестовое сообщение на ${TEST_PHONE} ──${RESET}`);
+const testGuest = await selectOrCreateGuest(TEST_PHONE);
+try {
+    await insertWaChat(client, TEST_PHONE, testGuest.id);
+} catch (error) {
+    if ((error as { code?: string }).code !== UNIQUE_ERROR_CODE) {
+        throw error;
+    }
+}
+const testMessageId = await sendTemplate(TEST_PHONE);
+if (!testMessageId) {
+    console.error(`${RED}Стоп: тестовое сообщение не ушло — рассылка не запущена${RESET}`);
+    process.exit(1);
+}
 console.log(
-    `${GRAY}template ${TEMPLATE_NAME}/en, params: [${partyDate}] [${partyVenue}], button payload ${partyId}${RESET}`,
+    `${GREEN}✓${RESET} ${GRAY}тест отправлен (${testMessageId}), пауза ${TEST_PAUSE_MS / 1000} с${RESET}`,
+);
+await sleep(TEST_PAUSE_MS);
+
+console.log(`\n${BOLD}${CYAN}── Отправляю ──${RESET}`);
+console.log(
+    `${GRAY}Прогресс пишу в ${checkpointPath} — при повторном запуске продолжу с места остановки${RESET}`,
+);
+console.log(
+    `${GRAY}Пауза между сообщениями ${SEND_INTERVAL_MS} мс, до ${SEND_MAX_ATTEMPTS} попыток на номер${RESET}`,
 );
 
-const phones = readFileSync(numbersPath, 'utf8')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '')
-    .map((line) => {
-        const phone = normalizePhone(line);
-        if (phone === null) {
-            console.error(`${RED}fatal: broken phone line in ${numbersPath}: ${line}${RESET}`);
-            process.exit(1);
-        }
-        return phone;
-    });
-
-const skipped = new Set<string>();
+// 5. Send loop: checkpoint before each send, so a rerun continues where it stopped.
 let sentCount = 0;
 let failedCount = 0;
-
-const inCheckpoint = phones.filter((phone) => checkpoint.has(phone)).length;
-const toProcess = Math.min(phones.length - inCheckpoint, sendBudget);
-console.log(
-    `${BOLD}plan: ${phones.length} numbers in file, ${inCheckpoint} already in checkpoint, ${toProcess} to process, budget ${sendBudget}${RESET}`,
-);
-console.log(`${GRAY}checkpoint: ${checkpointPath}${RESET}`);
-console.log(
-    `${GRAY}pacing ${SEND_INTERVAL_MS}ms, retries ${SEND_MAX_ATTEMPTS}, backoff base ${BACKOFF_BASE_MS}ms${RESET}`,
-);
-
 const loopStartedAtMs = Date.now();
-const progress = new Progress(phones.length - inCheckpoint, sendBudget, loopStartedAtMs, () => ({
+const progress = new Progress(toSend.length, sendBudget, loopStartedAtMs, () => ({
     sent: sentCount,
     failed: failedCount,
-    skipped: skipped.size,
+    skipped: 0,
 }));
 progress.draw();
 
-for (const phone of phones) {
+for (const phone of toSend) {
     if (sentCount >= sendBudget) {
         progress.event(
-            `${YELLOW}budget limit reached: ${sentCount}/${sendBudget} sent, stopping${RESET}`,
+            `${YELLOW}Суточный лимит достигнут: отправлено ${sentCount}/${sendBudget}, останавливаюсь${RESET}`,
         );
         break;
     }
-    if (checkpoint.has(phone) || skipped.has(phone)) {
-        continue;
-    }
 
     const guest = await selectOrCreateGuest(phone);
-    if (!guest.marketing_enable) {
-        skipped.add(phone);
-        progress.event(`${GRAY}skip ${phone} — no marketing consent${RESET}`);
-        continue;
-    }
-    const chat = await selectWaChat(client, phone);
-    if (chat) {
-        const liveChatBoundary = toDateTime(Date.now() - LIVE_CHAT_WINDOW_MS);
-        if (
-            chat.paused_at !== null ||
-            (chat.last_received_message_at !== null &&
-                toDateTime(chat.last_received_message_at) > liveChatBoundary)
-        ) {
-            skipped.add(phone);
-            const reason = chat.paused_at !== null ? 'paused' : 'live chat <24h';
-            progress.event(`${GRAY}skip ${phone} — ${reason}${RESET}`);
-            continue;
-        }
-    } else {
-        try {
-            await insertWaChat(client, phone, guest.id);
-        } catch (error) {
-            if ((error as { code?: string }).code !== UNIQUE_ERROR_CODE) {
-                throw error;
-            }
+    try {
+        await insertWaChat(client, phone, guest.id);
+    } catch (error) {
+        if ((error as { code?: string }).code !== UNIQUE_ERROR_CODE) {
+            throw error;
         }
     }
 
@@ -222,7 +349,7 @@ for (const phone of phones) {
     if (!waMessageId) {
         failedCount++;
         appendCheckpoint(checkpointPath, phone, 'failed');
-        progress.event(`${RED}fail ${phone} — send rejected, see error above${RESET}`);
+        progress.event(`${RED}✗ ${phone} — WhatsApp отклонил, подробности выше${RESET}`);
         await sleep(SEND_INTERVAL_MS);
         continue;
     }
@@ -245,29 +372,33 @@ for (const phone of phones) {
 
     sentCount++;
     appendCheckpoint(checkpointPath, phone, 'sent');
-    progress.event(`${GRAY}sent ${phone} ${waMessageId} ${sendMs}ms${RESET}`);
+    progress.event(
+        `${GREEN}✓${RESET} ${GRAY}${phone} отправлено за ${sendMs} мс (${waMessageId})${RESET}`,
+    );
     await sleep(SEND_INTERVAL_MS);
 }
 
 progress.finish();
 
-const untouched = phones.filter((phone) => !checkpoint.has(phone) && !skipped.has(phone)).length;
+const untouched = toSend.length - sentCount - failedCount;
 const elapsedSec = Math.round((Date.now() - loopStartedAtMs) / 1000);
-console.log(`${BOLD}done ${partyId} in ${fmtMmSs(elapsedSec)}${RESET}`);
+console.log(`\n${BOLD}${CYAN}═══ Готово: ${partyId}, ${fmtMmSs(elapsedSec)} ═══${RESET}`);
 console.log(
-    `${BOLD}sent ${sentCount}  failed ${failedCount}  skipped ${skipped.size}  untouched ${untouched}${RESET}`,
+    `Отправлено ${GREEN}${sentCount}${RESET}, отклонено ${RED}${failedCount}${RESET}, не дошла очередь ${YELLOW}${untouched}${RESET}`,
 );
-console.log(`${BOLD}budget left ${sendBudget - sentCount}/${sendBudget}${RESET}`);
+console.log(`Остаток суточного лимита: ${sendBudget - sentCount} из ${sendBudget}`);
 if (sentCount === 0) {
-    console.log(`${RED}nothing delivered${RESET}`);
+    console.log(`${RED}Ни одно сообщение не доставлено${RESET}`);
 } else if (failedCount > 0) {
-    console.log(`${YELLOW}delivery degraded: ${failedCount} rejected by Meta${RESET}`);
+    console.log(
+        `${YELLOW}Часть не ушла: ${failedCount} номеров отклонил WhatsApp — смотри ошибки выше${RESET}`,
+    );
 } else {
-    console.log('delivery ok: no send errors');
+    console.log(`${GREEN}Все сообщения ушли без ошибок${RESET}`);
 }
 if (untouched > 0) {
     console.log(
-        `${YELLOW}${untouched} numbers left — rerun the same command to continue from checkpoint${RESET}`,
+        `${YELLOW}Осталось ${untouched} номеров — запусти ту же команду позже, продолжу с места остановки${RESET}`,
     );
 }
 client.release();
@@ -275,9 +406,8 @@ await pool.end();
 
 async function sendTemplate(to: string): Promise<string | null> {
     for (let attempt = 1; attempt <= SEND_MAX_ATTEMPTS; attempt++) {
-        const response = await fetch(
-            `https://graph.facebook.com/${WA_API_VERSION}/${env.WA_PHONE_ID}/messages`,
-            {
+        const response = await waitForNetwork(() =>
+            fetch(`https://graph.facebook.com/${WA_API_VERSION}/${env.WA_PHONE_ID}/messages`, {
                 method: 'POST',
                 headers: {
                     authorization: `Bearer ${env.WA_TOKEN}`,
@@ -308,7 +438,7 @@ async function sendTemplate(to: string): Promise<string | null> {
                         ],
                     },
                 }),
-            },
+            }),
         );
 
         if (response.ok) {
@@ -324,20 +454,20 @@ async function sendTemplate(to: string): Promise<string | null> {
         const graphError = graphErrorSchema.safeParse(body);
         const errorCode = graphError.success ? graphError.data.error.code : null;
         progress.event(
-            `${RED}http ${response.status} code ${errorCode ?? 'n/a'} ${to} ${JSON.stringify(body)}${RESET}`,
+            `${RED}Ошибка WhatsApp API для ${to}: http ${response.status}, код ${errorCode ?? 'n/a'} — ${JSON.stringify(body)}${RESET}`,
             console.error,
         );
         if (errorCode === MARKETING_OPT_OUT_ERROR_CODE) {
             await updateGuestMarketingEnableOff(client, to);
             progress.event(
-                `${YELLOW}${to} opted out of marketing (${MARKETING_OPT_OUT_ERROR_CODE}), consent revoked${RESET}`,
+                `${YELLOW}${to} отписался от рассылок (код ${MARKETING_OPT_OUT_ERROR_CODE}) — согласие снято в базе${RESET}`,
             );
             return null;
         }
         if (errorCode === SPAM_RESTRICTION_ERROR_CODE) {
             progress.clearLine();
             console.error(
-                `${RED}fatal: number is spam-restricted (${SPAM_RESTRICTION_ERROR_CODE}) — check quality in WhatsApp Manager${RESET}`,
+                `${RED}Стоп: наш номер ограничен за спам (код ${SPAM_RESTRICTION_ERROR_CODE}) — проверь качество в WhatsApp Manager${RESET}`,
             );
             process.exit(1);
         }
@@ -350,13 +480,15 @@ async function sendTemplate(to: string): Promise<string | null> {
         if (attempt < SEND_MAX_ATTEMPTS) {
             const delayMs = BACKOFF_BASE_MS * 2 ** (attempt - 1);
             progress.event(
-                `${YELLOW}retry ${attempt}/${SEND_MAX_ATTEMPTS} ${to} in ${delayMs}ms${RESET}`,
+                `${YELLOW}Повтор ${attempt}/${SEND_MAX_ATTEMPTS} для ${to} через ${delayMs} мс${RESET}`,
             );
             await sleep(delayMs);
         }
     }
     progress.clearLine();
-    console.error(`${RED}fatal: throttled — ${to} not sent in ${SEND_MAX_ATTEMPTS} tries${RESET}`);
+    console.error(
+        `${RED}Стоп: WhatsApp троттлит — ${to} не ушёл за ${SEND_MAX_ATTEMPTS} попытки${RESET}`,
+    );
     process.exit(1);
 }
 
@@ -384,4 +516,19 @@ async function selectOrCreateGuest(waPhone: string): Promise<GuestStorage> {
         }
     }
     return selectOrCreateGuest(waPhone);
+}
+
+// Сеть (VPN) может пропасть посреди рассылки: ждём её возврата, а не падаем — иначе номер зависнет в чекпоинте как «sending».
+async function waitForNetwork(request: () => Promise<Response>): Promise<Response> {
+    for (;;) {
+        try {
+            return await request();
+        } catch (error) {
+            progress.event(
+                `${YELLOW}Сеть недоступна (${error instanceof Error ? (error.cause instanceof Error ? error.cause.message : error.message) : String(error)}) — жду ${NETWORK_RETRY_MS / 1000} с и пробую снова${RESET}`,
+                console.error,
+            );
+            await sleep(NETWORK_RETRY_MS);
+        }
+    }
 }

@@ -4,6 +4,8 @@ export const BOLD = '\x1b[1;97m';
 export const GRAY = '\x1b[90m';
 export const RED = '\x1b[91m';
 export const YELLOW = '\x1b[93m';
+export const GREEN = '\x1b[92m';
+export const CYAN = '\x1b[96m';
 export const RESET = '\x1b[0m';
 
 const SEPARATORS = /[\s().\-/‐‑‒–—―]/g;

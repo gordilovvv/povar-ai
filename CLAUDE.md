@@ -129,15 +129,7 @@ typescript, pg + pg-format, Grammy, Zod, Pino + Pino Pretty. Менеджер п
 
 ### Рассылки
 
-Порядок: сначала афиша в S3, потом `marketing_message` у вечеринки, только потом запуск.
-
-1. Залить афишу и получить ссылку (печатает `s3://<key>`):
-   `pnpm exec tsx --conditions=development --env-file=.env.prod scripts/UploadToS3.ts <полный-путь-к-файлу>`
-2. Заполнить `party.marketing_message` — jsonb `{ "image": "s3://<key>", "message": "<текст под фото>" }`. Без него нажатие кнопки в шаблоне ничего не отправит.
-3. Запустить рассылку — первым аргументом `party_id`, вторым файл с номерами (по номеру на строку):
-   `pnpm exec tsx --conditions=development --env-file=.env.prod marketing/StartMarketing.ts <party_id> <numbers-file>`
-
-Скрипт шлёт шаблон `party_invite` и пропускает тех, кто на паузе, отписан от маркетинга или уже переписывается. Прогресс пишется в `.marketing-<party_id>.state` рядом со скриптом до отправки, поэтому повторный запуск не дублирует. Кнопку «Info» в шаблоне обрабатывает `src/Marketing.ts`: шлёт афишу с подписью и помечает отправку в `wa_marketing_sends`.
+Когда пользователь просит запустить рассылку, дать команду для рассылки или объяснить, как она запускается — используй скилл `marketing`. Все шаги (S3 → `marketing_message` → `StartMarketing.ts`), лимиты и обработка кнопки Info там.
 
 ### Время
 

@@ -1,1 +1,2 @@
-.marketing-*.state
+tmp/*.state
+tmp/*.list.txt
