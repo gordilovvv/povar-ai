@@ -44,16 +44,16 @@ export const sendWhatsappPhoto = async (
     photo: Blob,
     caption?: string,
 ): Promise<{ waMessageId: string; mediaId: string }> => {
-    const mediaId = await uploadWhatsappPhoto(photo);
-    const waMessageId = await sendWhatsappPhotoByMediaId(to, mediaId, caption);
+    const mediaId = await uploadWhatsappMedia(photo);
+    const waMessageId = await sendWhatsappMediaByMediaId(to, 'image', mediaId, caption);
     return { waMessageId, mediaId };
 };
 
-export const uploadWhatsappPhoto = async (photo: Blob): Promise<string> => {
+export const uploadWhatsappMedia = async (media: Blob): Promise<string> => {
     const form = new FormData();
     form.append('messaging_product', 'whatsapp');
-    form.append('type', photo.type);
-    form.append('file', photo, 'photo');
+    form.append('type', media.type);
+    form.append('file', media, 'media');
 
     const uploadResponse = await fetch(
         `https://graph.facebook.com/${WA_API_VERSION}/${env.WA_PHONE_ID}/media`,
@@ -77,15 +77,16 @@ export const uploadWhatsappPhoto = async (photo: Blob): Promise<string> => {
     return uploaded.data.id;
 };
 
-export const sendWhatsappPhotoByMediaId = async (
+export const sendWhatsappMediaByMediaId = async (
     to: string,
+    type: 'image' | 'video',
     mediaId: string,
     caption?: string,
 ): Promise<string> =>
     postWhatsappMessage({
         to,
-        type: 'image',
-        image: caption ? { id: mediaId, caption } : { id: mediaId },
+        type,
+        [type]: caption ? { id: mediaId, caption } : { id: mediaId },
     });
 
 const mediaMetaSchema = z.looseObject({ url: z.string(), mime_type: z.string() });

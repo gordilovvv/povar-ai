@@ -7,10 +7,11 @@ export const partyTypeSchema = z.enum(['owned', 'invited']);
 
 type PartyType = z.infer<typeof partyTypeSchema>;
 
-export const marketingMessageSchema = z.object({
-    image: z.string().startsWith('s3://'),
-    message: z.string().min(1),
-});
+const s3Reference = z.string().startsWith('s3://');
+export const marketingMessageSchema = z.union([
+    z.object({ image: s3Reference, message: z.string().min(1) }),
+    z.object({ video: s3Reference, message: z.string().min(1) }),
+]);
 
 export type MarketingMessage = z.infer<typeof marketingMessageSchema>;
 

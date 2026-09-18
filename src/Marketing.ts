@@ -14,9 +14,9 @@ import { env } from '#environment.js';
 import { Logger } from '#Lib/Logger.js';
 import { downloadFromS3 } from '#Lib/S3.js';
 import {
-    sendWhatsappPhotoByMediaId,
+    sendWhatsappMediaByMediaId,
     sendWhatsappText,
-    uploadWhatsappPhoto,
+    uploadWhatsappMedia,
 } from '#Platforms/Whatsapp/index.js';
 import type { WaMessage } from '#Platforms/Whatsapp/Parse.js';
 
@@ -69,6 +69,10 @@ export class Marketing {
             return;
         }
         const marketing = parsed.data;
+        const media =
+            'video' in marketing
+                ? { type: 'video' as const, reference: marketing.video }
+                : { type: 'image' as const, reference: marketing.image };
 
         const readClient = await pool.connect();
         try {
@@ -85,11 +89,7 @@ export class Marketing {
             return;
         }
 
-        const { waMessageId, mediaId } = await Marketing.sendPhoto(
-            phone,
-            marketing.image,
-            marketing.message,
-        );
+        const { waMessageId, mediaId } = await Marketing.sendMedia(phone, media, marketing.message);
 
         const sentAt = new Date();
         const client = await pool.connect();
@@ -105,7 +105,7 @@ export class Marketing {
                 worker_status: 'skipped',
                 concurrency_version: 0,
                 sent_at: sentAt,
-                media_type: 'image',
+                media_type: media.type,
                 media_id: mediaId,
             });
             await updateWaChatLastSent(client, phone, sentAt);
@@ -129,17 +129,26 @@ export class Marketing {
         Logger.log(`[marketing] ${phone} message ${partyId} sent: media_id=${mediaId}`);
     }
 
-    private static async sendPhoto(phone: string, image: string, caption: string) {
-        const cached = Marketing.mediaIds.get(image);
+    private static async sendMedia(
+        phone: string,
+        media: { type: 'image' | 'video'; reference: string },
+        caption: string,
+    ) {
+        const cached = Marketing.mediaIds.get(media.reference);
         const fresh = !!cached && Date.now() - cached.uploadedAtMs < Marketing.MEDIA_TTL_MS;
         if (cached && fresh) {
             try {
                 return {
-                    waMessageId: await sendWhatsappPhotoByMediaId(phone, cached.mediaId, caption),
+                    waMessageId: await sendWhatsappMediaByMediaId(
+                        phone,
+                        media.type,
+                        cached.mediaId,
+                        caption,
+                    ),
                     mediaId: cached.mediaId,
                 };
             } catch (error) {
-                Marketing.mediaIds.delete(image);
+                Marketing.mediaIds.delete(media.reference);
                 Logger.logWarn(
                     `[marketing] media_id ${cached.mediaId} rejected, re-uploading`,
                     error,
@@ -147,10 +156,13 @@ export class Marketing {
             }
         }
 
-        const photo = await downloadFromS3(image);
-        const mediaId = await uploadWhatsappPhoto(photo);
-        Marketing.mediaIds.set(image, { mediaId, uploadedAtMs: Date.now() });
-        return { waMessageId: await sendWhatsappPhotoByMediaId(phone, mediaId, caption), mediaId };
+        const file = await downloadFromS3(media.reference);
+        const mediaId = await uploadWhatsappMedia(file);
+        Marketing.mediaIds.set(media.reference, { mediaId, uploadedAtMs: Date.now() });
+        return {
+            waMessageId: await sendWhatsappMediaByMediaId(phone, media.type, mediaId, caption),
+            mediaId,
+        };
     }
 
     private static async unsubscribeFromMarketing(
