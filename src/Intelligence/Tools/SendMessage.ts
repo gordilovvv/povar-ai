@@ -1,11 +1,13 @@
 import { ulid } from 'ulid';
 import { z } from 'zod';
+import { updateGuestlistTableOffered } from '#Db/Guestlist.js';
+import { updateGuestProfile } from '#Db/Guests.js';
 import { pool } from '#Db/Pool.js';
 import { selectWaChat, updateWaChatLastSent } from '#Db/WaChats.js';
 import { insertWaMessage } from '#Db/WaMessages.js';
 import { env } from '#environment.js';
 import { badInput } from '#Intelligence/Tools/Utils.js';
-import { stripLongDashes, stripYo } from '#Lib/Fmt.js';
+import { stripLongDashes, stripYo, toDateTime } from '#Lib/Fmt.js';
 import { Logger } from '#Lib/Logger.js';
 import type { AgentTool, ToolContext } from '#Lib/Tools.js';
 import { sendWhatsappText } from '#Platforms/Whatsapp/index.js';
@@ -39,7 +41,9 @@ const handler = async (ctx: ToolContext, raw: unknown) => {
         return { ok: false, error: 'chat_paused', instruction: PAUSED_INSTRUCTION };
     }
 
-    return sendMessages(ctx, parsed.data.texts);
+    const result = await sendMessages(ctx, parsed.data.texts);
+    await saveUnsent(ctx);
+    return result;
 };
 
 export const sendMessages = async (ctx: ToolContext, texts: string[]) => {
@@ -88,6 +92,26 @@ export const sendMessages = async (ctx: ToolContext, texts: string[]) => {
     }
 
     return { ok: true, sent: prepared.length };
+};
+
+export const saveUnsent = async (ctx: ToolContext) => {
+    const { instaAsked, tableOfferedPartyId } = ctx.unsent;
+    if (!instaAsked && !tableOfferedPartyId) {
+        return;
+    }
+    const now = toDateTime(Date.now());
+    const client = await pool.connect();
+    try {
+        if (instaAsked) {
+            await updateGuestProfile(client, ctx.guestId, { instagram_asked_at: now });
+        }
+        if (tableOfferedPartyId) {
+            await updateGuestlistTableOffered(client, tableOfferedPartyId, ctx.guestId, now);
+        }
+    } finally {
+        client.release();
+    }
+    ctx.unsent = {};
 };
 
 export default { name, description, input, handler } satisfies AgentTool;

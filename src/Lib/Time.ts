@@ -1,10 +1,12 @@
 import dayjs from 'dayjs';
+import isoWeek from 'dayjs/plugin/isoWeek.js';
 import timezone from 'dayjs/plugin/timezone.js';
 import utc from 'dayjs/plugin/utc.js';
 import type { Lang } from '#Lib/Lang.js';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
+dayjs.extend(isoWeek);
 
 const DUBAI_TZ = 'Asia/Dubai';
 
@@ -24,6 +26,12 @@ export const formatDubai = (date: Date | string, lang: Lang) => {
 
 export const isDubaiToday = (date: Date | string) =>
     dayjs(date).tz(DUBAI_TZ).isSame(getDubaiTime(), 'day');
+
+export const dubaiWeeksFromNow = (date: Date | string) =>
+    dayjs(date).tz(DUBAI_TZ).startOf('isoWeek').diff(getDubaiTime().startOf('isoWeek'), 'week');
+
+export const dubaiDaysFromNow = (date: Date | string) =>
+    dayjs(date).tz(DUBAI_TZ).startOf('day').diff(getDubaiTime().startOf('day'), 'day');
 
 export const formatDubaiStamp = (date: Date | string) => {
     const d = dayjs(date).tz(DUBAI_TZ);

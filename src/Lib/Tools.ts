@@ -4,6 +4,10 @@ export interface ToolContext {
     guestId: string;
     phone: string;
     replies: string[];
+    /**
+     * Отметки «спросил / предложил» из save_guest: в базу их пишет send_message, когда текст дошёл до гостя.
+     */
+    unsent: { instaAsked?: true; tableOfferedPartyId?: string };
 }
 
 export interface AgentTool {

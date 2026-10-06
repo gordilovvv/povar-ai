@@ -6,12 +6,11 @@ import {
     selectGuestlistEntry,
     updateGuestlistFriends,
     updateGuestlistTableAnswer,
-    updateGuestlistTableOffered,
 } from '#Db/Guestlist.js';
 import { updateGuestProfile } from '#Db/Guests.js';
 import { FOREIGN_KEY_ERROR_CODE, pool, UNIQUE_ERROR_CODE } from '#Db/Pool.js';
 import pauseChat from '#Intelligence/Tools/PauseChat.js';
-import { sendMessages } from '#Intelligence/Tools/SendMessage.js';
+import { saveUnsent, sendMessages } from '#Intelligence/Tools/SendMessage.js';
 import { badInput } from '#Intelligence/Tools/Utils.js';
 import { toDateTime } from '#Lib/Fmt.js';
 import type { Lang } from '#Lib/Lang.js';
@@ -103,7 +102,10 @@ const handler = async (ctx: ToolContext, raw: unknown) => {
             await updateGuestlistFriends(client, party_id, ctx.guestId, friends);
         }
         if (table_offered) {
-            await updateGuestlistTableOffered(client, party_id, ctx.guestId, now);
+            ctx.unsent.tableOfferedPartyId = party_id;
+        }
+        if (insta_asked) {
+            ctx.unsent.instaAsked = true;
         }
         if (want_table !== undefined) {
             const captured = await updateGuestlistTableAnswer(
@@ -115,13 +117,15 @@ const handler = async (ctx: ToolContext, raw: unknown) => {
             );
             answered = !!captured;
         }
-        const guest = await updateGuestProfile(client, ctx.guestId, {
-            ...profile,
-            instagram_asked_at: insta_asked ? now : undefined,
-        });
+        const guest = await updateGuestProfile(client, ctx.guestId, profile);
         lang = guest?.lang ?? 'en';
     } finally {
         client.release();
+    }
+
+    // send_message в этом батче стоял раньше save_guest — другой отправки в этом ходу не будет
+    if (ctx.replies.length) {
+        await saveUnsent(ctx);
     }
 
     Logger.log(`[save_guest] ${ctx.phone} on ${party_id}, table: ${want_table ?? 'not asked'}`);

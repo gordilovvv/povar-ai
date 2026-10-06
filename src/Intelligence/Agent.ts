@@ -30,6 +30,12 @@ export class Agent {
         z.object({ error: z.literal('chat_paused') }),
     ]);
     private static readonly OK = z.object({ ok: z.literal(true) });
+    private static readonly SKIPPED = {
+        ok: false,
+        error: 'skipped',
+        instruction:
+            'Not run: an earlier tool in this response failed or already answered the guest. Read its result and decide again.',
+    } as const;
 
     constructor(
         readonly phone: string,
@@ -46,7 +52,12 @@ export class Agent {
         }
 
         const replies: string[] = [];
-        const ctx: ToolContext = { guestId: guest.id, phone: this.phone, replies };
+        const ctx: ToolContext = {
+            guestId: guest.id,
+            phone: this.phone,
+            replies,
+            unsent: {},
+        };
 
         if (env.WA_SEND === 'on') {
             const last = history.findLast((message) => message.owner === 'guest');
@@ -81,8 +92,8 @@ export class Agent {
             const response = await this.create({
                 model: env.ANTHROPIC_MODEL,
                 max_tokens: Agent.MAX_TOKENS,
-                thinking: { type: 'adaptive' },
-                output_config: { effort: 'max' },
+                thinking: { type: 'adaptive', display: 'summarized' },
+                output_config: { effort: 'medium' },
                 system: Agent.buildSystem(context.context),
                 tools: Agent.tools.defs(),
                 messages,
@@ -110,7 +121,11 @@ export class Agent {
                 let everyToolSucceeded = true;
                 let replySent = false;
                 for (const toolUse of toolUses) {
-                    const output = await Agent.tools.run(toolUse.name, toolUse.input, ctx);
+                    // остаток батча после сбоя или ответа-тулом соврал бы гостю или продублировал ответ
+                    const output: unknown =
+                        everyToolSucceeded && !replyForbidden
+                            ? await Agent.tools.run(toolUse.name, toolUse.input, ctx)
+                            : Agent.SKIPPED;
                     replyForbidden ||= Agent.REPLY_FORBIDDEN.safeParse(output).success;
                     everyToolSucceeded &&= Agent.OK.safeParse(output).success;
                     replySent ||= toolUse.name === 'send_message';

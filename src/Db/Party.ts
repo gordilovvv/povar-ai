@@ -64,6 +64,8 @@ export const selectActivePartiesWithTimes = async (client: PoolClient) => {
     return result.rows;
 };
 
+const PARTY_WITHOUT_END_HOURS = 24;
+
 export const selectPastPartiesByGuest = async (client: PoolClient, guestId: string) => {
     const result = await client.query<PastPartyStorage>(
         format(
@@ -73,9 +75,10 @@ export const selectPastPartiesByGuest = async (client: PoolClient, guestId: stri
             join party_time on party_time.party_id = party.id
             where party_guestlist.guest_id = %L
             group by party.id, party.name
-            having max(party_time.party_end_at) < now()
+            having max(coalesce(party_time.party_end_at, party_time.party_start_at + make_interval(hours => %L::int))) < now()
             order by 3 desc`,
             guestId,
+            PARTY_WITHOUT_END_HOURS,
         ),
     );
     return result.rows;
