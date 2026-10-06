@@ -11,7 +11,6 @@ export const environmentSchema = z.object({
     ANTHROPIC_MODEL: z.string(),
     WA_SEND: z.enum(['on', 'off']),
     TEXT_AFTER_PAUSE_CHAT: z.enum(['on', 'off']),
-    PARTY_ACTIVE_HOURS: z.string(),
     TELEGRAM_BOT_TOKEN: z.string(),
     TELEGRAM_GROUP_ID: z.string(),
     S3_ACCESS_KEY: z.string(),

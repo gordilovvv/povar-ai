@@ -23,6 +23,7 @@ const PARTY_ID = `test_loft_${ulid().toLowerCase()}`;
 const PARTY_NAME = 'Test Loft';
 const MAP_LINK = 'https://maps.app.goo.gl/test-loft';
 const PARTY_START = new Date(Date.now() + 2 * HOUR);
+const PARTY_END = new Date(PARTY_START.getTime() + 5 * HOUR);
 const FREE_ENTRY_BEFORE = new Date(PARTY_START.getTime() + HOUR);
 
 const GUEST_LINES = [
@@ -78,8 +79,8 @@ const seed = async () => {
             ],
         );
         await client.query(
-            'insert into party_time (party_id, party_start_at, free_entry_before) values ($1, $2, $3)',
-            [PARTY_ID, PARTY_START, FREE_ENTRY_BEFORE],
+            'insert into party_time (party_id, party_start_at, party_end_at, free_entry_before) values ($1, $2, $3, $4)',
+            [PARTY_ID, PARTY_START, PARTY_END, FREE_ENTRY_BEFORE],
         );
         await insertGuest(client, {
             id: ulid(),

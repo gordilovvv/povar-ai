@@ -1,7 +1,6 @@
 import type { PoolClient } from 'pg';
 import format from 'pg-format';
 import { z } from 'zod';
-import { env } from '#environment.js';
 
 export const partyTypeSchema = z.enum(['owned', 'invited']);
 
@@ -36,6 +35,7 @@ export interface PartyTablesStorage {
 export interface PartyTimeStorage {
     party_id: string;
     party_start_at: string;
+    party_end_at: string | null;
     free_entry_before: string | null;
 }
 
@@ -47,18 +47,18 @@ export interface PastPartyStorage {
 
 export interface PartyWithTimeStorage extends PartyStorage {
     party_start_at: string;
+    party_end_at: string | null;
     free_entry_before: string | null;
 }
 
 export const selectActivePartiesWithTimes = async (client: PoolClient) => {
     const result = await client.query<PartyWithTimeStorage>(
         format(
-            `select party.*, party_time.party_start_at, party_time.free_entry_before
+            `select party.*, party_time.party_start_at, party_time.party_end_at, party_time.free_entry_before
             from party
             join party_time on party_time.party_id = party.id
-            where party_time.party_start_at >= now() - make_interval(hours => %L::int)
+            where party_time.party_end_at >= now()
             order by party.id, party_time.party_start_at`,
-            env.PARTY_ACTIVE_HOURS,
         ),
     );
     return result.rows;
@@ -73,10 +73,9 @@ export const selectPastPartiesByGuest = async (client: PoolClient, guestId: stri
             join party_time on party_time.party_id = party.id
             where party_guestlist.guest_id = %L
             group by party.id, party.name
-            having max(party_time.party_start_at) < now() - make_interval(hours => %L::int)
+            having max(party_time.party_end_at) < now()
             order by 3 desc`,
             guestId,
-            env.PARTY_ACTIVE_HOURS,
         ),
     );
     return result.rows;
