@@ -8,6 +8,7 @@ import {
 import { Agent } from '#Intelligence/Agent.js';
 import { startGuestlistJob } from '#Jobs/Guestlist.js';
 import { startPauseAlertJob } from '#Jobs/PauseAlert.js';
+import { startGuestConfirmJob } from '#Jobs/GuestConfirm.js';
 import { toDateTime } from '#Lib/Fmt.js';
 import { Logger } from '#Lib/Logger.js';
 import { sleep } from '#Lib/Sleep.js';
@@ -107,6 +108,7 @@ running = true;
 void run();
 startGuestlistJob();
 startPauseAlertJob();
+startGuestConfirmJob();
 
 process.on('SIGTERM', () => {
     running = false;

@@ -1,6 +1,8 @@
 import type { PoolClient } from 'pg';
 import format from 'pg-format';
 
+export type GuestConfirmAnswer = 'pending' | 'yes' | 'no' | 'failed';
+
 export interface PartyGuestlistStorage {
     party_id: string;
     guest_id: string;
@@ -12,6 +14,7 @@ export interface PartyGuestlistStorage {
     friends: string[] | null;
     table_offered_at: string | null;
     telegram_alert_at: string | null;
+    guest_confirm_answer: GuestConfirmAnswer | null;
 }
 
 export const selectGuestlistByGuest = async (client: PoolClient, guestId: string) => {
@@ -129,6 +132,25 @@ export const updateGuestlistTableAnswer = async (
             returning *`,
             bookedTable,
             offeredAt,
+            partyId,
+            guestId,
+        ),
+    );
+    return result.rows.length ? result.rows[0] : null;
+};
+
+export const updateGuestlistGuestConfirmAnswer = async (
+    client: PoolClient,
+    partyId: string,
+    guestId: string,
+    answer: GuestConfirmAnswer,
+) => {
+    const result = await client.query<PartyGuestlistStorage>(
+        format(
+            `update party_guestlist set guest_confirm_answer = %L
+            where party_id = %L and guest_id = %L and guest_confirm_answer is not null
+            returning *`,
+            answer,
             partyId,
             guestId,
         ),

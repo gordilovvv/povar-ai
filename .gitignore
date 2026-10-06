@@ -14,3 +14,4 @@ secrets/
 # OS
 .DS_Store
 tests/output/
+backups/

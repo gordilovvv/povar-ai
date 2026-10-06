@@ -7,50 +7,44 @@ import {
     selectActivePartiesWithTimes,
 } from '#Db/Party.js';
 import { pool, UNIQUE_ERROR_CODE } from '#Db/Pool.js';
-import { selectWaChat, updateWaChatLastSent } from '#Db/WaChats.js';
+import { updateWaChatLastSent } from '#Db/WaChats.js';
 import { insertWaMarketingSend, selectWaMarketingSend } from '#Db/WaMarketingSends.js';
 import { insertWaMessage } from '#Db/WaMessages.js';
 import { env } from '#environment.js';
 import { Logger } from '#Lib/Logger.js';
 import { downloadFromS3 } from '#Lib/S3.js';
-import {
-    sendWhatsappMediaByMediaId,
-    sendWhatsappText,
-    uploadWhatsappMedia,
-} from '#Platforms/Whatsapp/index.js';
-import type { WaMessage } from '#Platforms/Whatsapp/Parse.js';
+import { sendWhatsappMediaByMediaId, uploadWhatsappMedia } from '#Platforms/Whatsapp/index.js';
 
-/** Ветки рассылки: нажатие кнопки шаблона и отписка. Обработанное сюда сообщение агенту не достаётся. */
-export class Marketing {
-    private static readonly STOP = /^stop$/i;
+/** Рассылка приглашений (шаблон party_invite): кнопка Info → афиша, STOP → отписка. */
+export class Invite {
+    static readonly STOP = /^stop$/i;
     private static readonly STOP_REPLY = "You're unsubscribed 😅";
     private static readonly MEDIA_TTL_MS = 25 * 24 * 60 * 60 * 1000;
     private static readonly mediaIds = new Map<string, { mediaId: string; uploadedAtMs: number }>();
 
-    static async handleMessage(
+    static async sendOnButton(
         client: PoolClient,
-        message: WaMessage,
-        now: Date,
+        payload: string,
+        phone: string,
     ): Promise<boolean> {
-        if (message.button) {
-            const payload = message.button.payload;
-            const party = (await selectActivePartiesWithTimes(client)).find(
-                (row) => row.id === payload,
-            );
-            if (!party) {
-                return false;
-            }
-
-            void Marketing.sendMarketingMessage(party, message.from);
-            return true;
+        const party = (await selectActivePartiesWithTimes(client)).find(
+            (row) => row.id === payload,
+        );
+        if (!party) {
+            return false;
         }
+        void Invite.sendMarketingMessage(party, phone);
+        return true;
+    }
 
-        const text = message.text?.body.trim();
-        if (text && Marketing.STOP.test(text)) {
-            return Marketing.unsubscribeFromMarketing(client, message, now);
+    static async unsubscribe(client: PoolClient, phone: string): Promise<string | null> {
+        const revoked = await updateGuestMarketingEnableOff(client, phone);
+        if (!revoked) {
+            Logger.log(`[marketing] ${phone} STOP repeated, consent already revoked`);
+            return null;
         }
-
-        return false;
+        Logger.log(`[marketing] ${phone} unsubscribed by STOP`);
+        return Invite.STOP_REPLY;
     }
 
     // @TODO сделать так, чтобы рассылку без сообщения запустить было нельзя
@@ -89,7 +83,7 @@ export class Marketing {
             return;
         }
 
-        const { waMessageId, mediaId } = await Marketing.sendMedia(phone, media, marketing.message);
+        const { waMessageId, mediaId } = await Invite.sendMedia(phone, media, marketing.message);
 
         const sentAt = new Date();
         const client = await pool.connect();
@@ -134,8 +128,8 @@ export class Marketing {
         media: { type: 'image' | 'video'; reference: string },
         caption: string,
     ) {
-        const cached = Marketing.mediaIds.get(media.reference);
-        const fresh = !!cached && Date.now() - cached.uploadedAtMs < Marketing.MEDIA_TTL_MS;
+        const cached = Invite.mediaIds.get(media.reference);
+        const fresh = !!cached && Date.now() - cached.uploadedAtMs < Invite.MEDIA_TTL_MS;
         if (cached && fresh) {
             try {
                 return {
@@ -148,7 +142,7 @@ export class Marketing {
                     mediaId: cached.mediaId,
                 };
             } catch (error) {
-                Marketing.mediaIds.delete(media.reference);
+                Invite.mediaIds.delete(media.reference);
                 Logger.logWarn(
                     `[marketing] media_id ${cached.mediaId} rejected, re-uploading`,
                     error,
@@ -158,68 +152,10 @@ export class Marketing {
 
         const file = await downloadFromS3(media.reference);
         const mediaId = await uploadWhatsappMedia(file);
-        Marketing.mediaIds.set(media.reference, { mediaId, uploadedAtMs: Date.now() });
+        Invite.mediaIds.set(media.reference, { mediaId, uploadedAtMs: Date.now() });
         return {
             waMessageId: await sendWhatsappMediaByMediaId(phone, media.type, mediaId, caption),
             mediaId,
         };
-    }
-
-    private static async unsubscribeFromMarketing(
-        client: PoolClient,
-        message: WaMessage,
-        now: Date,
-    ): Promise<boolean> {
-        const chat = await selectWaChat(client, message.from);
-        if (!chat) {
-            return false;
-        }
-
-        const revoked = await updateGuestMarketingEnableOff(client, message.from);
-
-        try {
-            // worker_status skipped напрямую: через insertIncomingWaMessage STOP ляжет как need_processed и агент ответит вторым сообщением
-            await insertWaMessage(client, {
-                id: ulid(),
-                wa_message_id: message.id,
-                wa_chat_phone: message.from,
-                text: message.text?.body ?? null,
-                owner: 'guest',
-                status: 'delivered',
-                worker_status: 'skipped',
-                concurrency_version: 0,
-                sent_at: now,
-            });
-        } catch (error) {
-            if ((error as { code?: string }).code !== UNIQUE_ERROR_CODE) {
-                throw error;
-            }
-        }
-
-        if (!revoked) {
-            Logger.log(`[marketing] ${message.from} STOP repeated, consent already revoked`);
-            return true;
-        }
-
-        if (env.WA_SEND !== 'on') {
-            Logger.log(`[marketing:off] ${message.from} stop reply: ${Marketing.STOP_REPLY}`);
-            return true;
-        }
-
-        const waMessageId = await sendWhatsappText(message.from, Marketing.STOP_REPLY);
-        await insertWaMessage(client, {
-            id: ulid(),
-            wa_message_id: waMessageId,
-            wa_chat_phone: message.from,
-            text: Marketing.STOP_REPLY,
-            owner: 'marketing',
-            status: 'sent',
-            worker_status: 'skipped',
-            concurrency_version: 0,
-            sent_at: now,
-        });
-        await updateWaChatLastSent(client, message.from, now);
-        Logger.log(`[marketing] ${message.from} unsubscribed by STOP`);
-        return true;
     }
 }

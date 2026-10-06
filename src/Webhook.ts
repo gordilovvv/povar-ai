@@ -16,7 +16,7 @@ import {
 import { env } from '#environment.js';
 import { toDateTime } from '#Lib/Fmt.js';
 import { Logger } from '#Lib/Logger.js';
-import { Marketing } from '#Marketing.js';
+import { Marketing } from '#Marketing/index.js';
 import { payloadSchema, waMessageMedia } from '#Platforms/Whatsapp/Parse.js';
 import { verifySignature } from '#Platforms/Whatsapp/Signature.js';
 

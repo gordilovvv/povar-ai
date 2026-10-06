@@ -4,8 +4,7 @@ import pg from 'pg';
 import format from 'pg-format';
 import { z } from 'zod';
 
-// SQL и отправка инлайнятся здесь: worker-тред под tsx не резолвит #-subpath и внутренние
-// .ts-модули, поэтому граф треда обходится без внутренних импортов (только node_modules).
+// TODO: #-импорты в треде работают (tsx, tsx watch, dist) — падало на environment.ts без --env-file. Перевести на pool из #Db/Pool.js и env из #environment.js, убрать workerData и свой Pool.
 
 export interface GuestlistJobConfig {
     databaseUrl: string;

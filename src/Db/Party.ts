@@ -82,6 +82,16 @@ export const selectPastPartiesByGuest = async (client: PoolClient, guestId: stri
     return result.rows;
 };
 
+export const selectPartyHasUpcomingStart = async (client: PoolClient, partyId: string) => {
+    const result = await client.query<{ upcoming: boolean }>(
+        format(
+            `select exists(select 1 from party_time where party_id = %L and party_start_at > now()) as upcoming`,
+            partyId,
+        ),
+    );
+    return result.rows[0]?.upcoming ?? false;
+};
+
 export const selectPartyTables = async (client: PoolClient, partyId: string) => {
     const result = await client.query<PartyTablesStorage>(
         format(`select * from party_tables where party_id = %L`, partyId),

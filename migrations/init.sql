@@ -47,7 +47,8 @@ create table party_guestlist (
     joined_at timestamp with time zone,
     friends text[], -- имя + фамилия одной строкой на друга
     table_offered_at timestamp with time zone,
-    telegram_alert_at timestamp with time zone
+    telegram_alert_at timestamp with time zone,
+    guest_confirm_answer text -- pending | yes | no | failed
 );
 
 -- WhatsApp
