@@ -10,10 +10,10 @@ const CONFIG = {
     telegramGroupId: 'E2E_GROUP',
 };
 
-// Дубай = UTC+4. Вечеринка стартует 22:00 по Дубаю (18:00Z); 18:00-порог того же дня = 14:00Z.
+// Дубай = UTC+4. Вечеринка стартует 22:00 по Дубаю (18:00Z); 21:00-порог того же дня = 17:00Z.
 const PARTY_START = '2030-06-15T18:00:00Z';
-const NOW_DUE = '2030-06-15T15:00:00Z'; // 19:00 Дубай: после 18:00, до старта
-const NOW_BEFORE_18 = '2030-06-15T09:00:00Z'; // 13:00 Дубай: порог не наступил
+const NOW_DUE = '2030-06-15T17:30:00Z'; // 21:30 Дубай: после 21:00, до старта
+const NOW_BEFORE_21 = '2030-06-15T09:00:00Z'; // 13:00 Дубай: порог не наступил
 const NOW_AFTER_START = '2030-06-15T19:00:00Z'; // 23:00 Дубай: вечеринка уже началась
 
 const PARTY_ID = 'E2E_JOBS_PARTY';
@@ -105,7 +105,7 @@ describe('e2e: jobs-guestlist', () => {
         await closePool();
     });
 
-    test('первичная рассылка: один список всей гостей + друзей после 18:00', async () => {
+    test('первичная рассылка: один список всей гостей + друзей после 21:00', async () => {
         await seed();
         sent = [];
         telegramOk = true;
@@ -155,12 +155,12 @@ describe('e2e: jobs-guestlist', () => {
         assert.notEqual(await alertedAtOf(G4), null, 'G4 помечен');
     });
 
-    test('до 18:00 не шлём', async () => {
+    test('до 21:00 не шлём', async () => {
         await seed();
         sent = [];
         await addGuestlistEntry(G1, null, '2030-06-10T10:00:00Z', null);
-        await runTick(pool, CONFIG, NOW_BEFORE_18);
-        assert.equal(sent.length, 0, 'порог 18:00 не наступил');
+        await runTick(pool, CONFIG, NOW_BEFORE_21);
+        assert.equal(sent.length, 0, 'порог 21:00 не наступил');
         assert.equal(await alertedAtOf(G1), null, 'ничего не помечено');
     });
 
@@ -171,6 +171,28 @@ describe('e2e: jobs-guestlist', () => {
         await runTick(pool, CONFIG, NOW_AFTER_START);
         assert.equal(sent.length, 0, 'вечеринка уже началась — окно закрыто');
         assert.equal(await alertedAtOf(G1), null);
+    });
+
+    test('гость без имени не захватывается: уходит после того, как имя сохранено', async () => {
+        await seed();
+        sent = [];
+        await dbQuery(`update guests set first_name = null, last_name = null where id = $1`, [G1]);
+        await addGuestlistEntry(G1, ['Eve Frolova'], '2030-06-10T10:00:00Z', null);
+        await runTick(pool, CONFIG, NOW_DUE);
+        assert.equal(sent.length, 0, 'безымянная запись пропущена');
+        assert.equal(await alertedAtOf(G1), null, 'не помечена — ждём имя');
+
+        await dbQuery(
+            `update guests set first_name = 'Anna', last_name = 'Ivanova' where id = $1`,
+            [G1],
+        );
+        await runTick(pool, CONFIG, NOW_DUE);
+        assert.equal(sent.length, 1, 'после сохранения имени ушло');
+        assert.equal(
+            sent[0]?.body.text,
+            '*Neon Night*\nГест\\-лист\n\n```\nAnna Ivanova\nEve Frolova\n```',
+        );
+        assert.notEqual(await alertedAtOf(G1), null);
     });
 
     test('сбой Telegram: гости остаются непомеченными, без throw', async () => {

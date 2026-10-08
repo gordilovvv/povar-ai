@@ -31,7 +31,7 @@ const telegramResponse = z.object({ ok: z.boolean(), description: z.string().opt
 
 const selectDueParties = async (pool: pg.Pool, now: string | null) => {
     // now === null в проде -> шлюз считается от now(); тесты подставляют фиксированное время.
-    // Порог = 18:00 по Дубаю календарного дня самой вечеринки; вечеринка ещё не началась.
+    // Порог = 21:00 по Дубаю календарного дня самой вечеринки; вечеринка ещё не началась.
     const result = await pool.query<DuePartyRow>(
         format(
             `with tick as (select coalesce(%L::timestamptz, now()) as now_at)
@@ -50,7 +50,7 @@ const selectDueParties = async (pool: pg.Pool, now: string | null) => {
             ) t on true
             where t.start_at is not null
                 and (select now_at from tick) >= (
-                    date_trunc('day', t.start_at at time zone 'Asia/Dubai') + interval '18 hours'
+                    date_trunc('day', t.start_at at time zone 'Asia/Dubai') + interval '21 hours'
                 ) at time zone 'Asia/Dubai'
                 and exists(
                     select 1 from party_guestlist n
@@ -71,6 +71,7 @@ const claimGuests = async (pool: pg.Pool, partyId: string) => {
             `update party_guestlist gl set telegram_alert_at = now()
             from guests g
             where gl.party_id = %L and gl.guest_id = g.id and gl.telegram_alert_at is null
+                and g.first_name is not null
             returning gl.guest_id, gl.joined_at, g.first_name, g.last_name, gl.friends`,
             partyId,
         ),
