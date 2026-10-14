@@ -15,3 +15,5 @@ secrets/
 .DS_Store
 tests/output/
 backups/
+exports/
+marketing/tmp/

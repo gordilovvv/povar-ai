@@ -108,6 +108,9 @@ const handleWebhook: RequestHandler = async (request) => {
             if (!parsedStatus.success) {
                 continue;
             }
+            if (parsedStatus.data === 'failed') {
+                Logger.logWarn(`[webhook] status failed ${update.id}`, update.errors);
+            }
             const current = await selectWaMessage(client, update.id);
             if (!current) {
                 continue;

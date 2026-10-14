@@ -24,6 +24,7 @@ const messageSchema = z.looseObject({
 const statusSchema = z.looseObject({
     id: z.string(),
     status: z.string(), // sent | delivered | read | failed
+    errors: z.array(z.looseObject({ code: z.number(), title: z.string().optional() })).optional(),
 });
 
 const valueSchema = z.looseObject({
