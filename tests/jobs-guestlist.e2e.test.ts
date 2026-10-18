@@ -10,11 +10,10 @@ const CONFIG = {
     telegramGroupId: 'E2E_GROUP',
 };
 
-// Дубай = UTC+4. Вечеринка стартует 22:00 по Дубаю (18:00Z); 21:00-порог того же дня = 17:00Z.
 const PARTY_START = '2030-06-15T18:00:00Z';
-const NOW_DUE = '2030-06-15T17:30:00Z'; // 21:30 Дубай: после 21:00, до старта
-const NOW_BEFORE_21 = '2030-06-15T09:00:00Z'; // 13:00 Дубай: порог не наступил
-const NOW_AFTER_START = '2030-06-15T19:00:00Z'; // 23:00 Дубай: вечеринка уже началась
+const ALERT_AT = '2030-06-15T17:00:00Z';
+const NOW_DUE = '2030-06-15T17:30:00Z';
+const NOW_BEFORE_ALERT = '2030-06-15T09:00:00Z';
 
 const PARTY_ID = 'E2E_JOBS_PARTY';
 const G1 = 'E2E_JOBS_G1';
@@ -44,10 +43,10 @@ const seed = async () => {
         `insert into party (id, type, name, location) values ($1,'owned','Neon Night','Dubai')`,
         [PARTY_ID],
     );
-    await dbQuery(`insert into party_time (party_id, party_start_at) values ($1,$2)`, [
-        PARTY_ID,
-        PARTY_START,
-    ]);
+    await dbQuery(
+        `insert into party_time (party_id, party_start_at, guestlist_alert_at) values ($1,$2,$3)`,
+        [PARTY_ID, PARTY_START, ALERT_AT],
+    );
     for (const [id, first, last] of [
         [G1, 'Anna', 'Ivanova'],
         [G2, 'Boris', 'Petrov'],
@@ -105,7 +104,7 @@ describe('e2e: jobs-guestlist', () => {
         await closePool();
     });
 
-    test('первичная рассылка: один список всей гостей + друзей после 21:00', async () => {
+    test('первичная рассылка: один список всей гостей + друзей после guestlist_alert_at', async () => {
         await seed();
         sent = [];
         telegramOk = true;
@@ -155,22 +154,36 @@ describe('e2e: jobs-guestlist', () => {
         assert.notEqual(await alertedAtOf(G4), null, 'G4 помечен');
     });
 
-    test('до 21:00 не шлём', async () => {
+    test('до guestlist_alert_at не шлём', async () => {
         await seed();
         sent = [];
         await addGuestlistEntry(G1, null, '2030-06-10T10:00:00Z', null);
-        await runTick(pool, CONFIG, NOW_BEFORE_21);
-        assert.equal(sent.length, 0, 'порог 21:00 не наступил');
+        await runTick(pool, CONFIG, NOW_BEFORE_ALERT);
+        assert.equal(sent.length, 0, 'порог не наступил');
         assert.equal(await alertedAtOf(G1), null, 'ничего не помечено');
     });
 
-    test('после старта вечеринки не шлём', async () => {
+    test('guestlist_alert_at null при неотправленных гостях: runTick падает, ничего не шлёт', async () => {
         await seed();
         sent = [];
+        await dbQuery(`update party_time set guestlist_alert_at = null where party_id = $1`, [
+            PARTY_ID,
+        ]);
         await addGuestlistEntry(G1, null, '2030-06-10T10:00:00Z', null);
-        await runTick(pool, CONFIG, NOW_AFTER_START);
-        assert.equal(sent.length, 0, 'вечеринка уже началась — окно закрыто');
+        await assert.rejects(runTick(pool, CONFIG, NOW_DUE), /guestlist_alert_at is null/);
+        assert.equal(sent.length, 0);
         assert.equal(await alertedAtOf(G1), null);
+    });
+
+    test('guestlist_alert_at null, но все гости уже отправлены: не падает', async () => {
+        await seed();
+        sent = [];
+        await dbQuery(`update party_time set guestlist_alert_at = null where party_id = $1`, [
+            PARTY_ID,
+        ]);
+        await addGuestlistEntry(G1, null, '2030-06-10T10:00:00Z', '2030-06-15T17:01:00Z');
+        await runTick(pool, CONFIG, NOW_DUE);
+        assert.equal(sent.length, 0);
     });
 
     test('гость без имени не захватывается: уходит после того, как имя сохранено', async () => {

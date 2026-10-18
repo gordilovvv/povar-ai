@@ -81,7 +81,7 @@ const seed = async () => {
             [PARTY_ID, MAP_LINK, NOTES],
         );
         await client.query(
-            'insert into party_time (party_id, party_start_at, party_end_at, free_entry_before) values ($1, $2, $3, $4)',
+            'insert into party_time (party_id, party_start_at, party_end_at, free_entry_before, guestlist_alert_at) values ($1, $2, $3, $4, $2)',
             [PARTY_ID, PARTY_START, PARTY_END, FREE_ENTRY_BEFORE],
         );
         await insertGuest(client, {

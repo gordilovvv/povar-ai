@@ -20,7 +20,8 @@ create table party_time (
     party_id text not null references party (id),
     party_start_at timestamp with time zone,
     party_end_at timestamp with time zone,
-    free_entry_before timestamp with time zone
+    free_entry_before timestamp with time zone,
+    guestlist_alert_at timestamp with time zone
 );
 
 -- Guests (users)

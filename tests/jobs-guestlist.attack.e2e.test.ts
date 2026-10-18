@@ -14,7 +14,7 @@
 //   - инъекция: SQL-мета (' " ) ; %L drop) в имени/друге/названии — не ломает запрос
 //     (таблицы целы через to_regclass) и уходит как данные;
 //   - гонка/идемпотентность: два параллельных runTick на одну вечеринку НЕ задваивают отправку;
-//   - граница 21:00 Дубая: за секунду до порога не шлём, ровно в порог — шлём;
+//   - граница guestlist_alert_at: за секунду до порога не шлём, ровно в порог — шлём;
 //   - гость без имени и без друзей: пустых строк в code-block нет.
 
 import assert from 'node:assert/strict';
@@ -29,9 +29,9 @@ const CONFIG = {
     telegramGroupId: 'E2E_atk_gl_group',
 };
 
-// Дубай = UTC+4. Старт 22:00 Дубай = 18:00Z; порог 21:00 Дубай того же дня = 17:00Z.
 const PARTY_START = '2031-06-15T18:00:00Z';
-const NOW_DUE = '2031-06-15T17:30:00Z'; // 21:30 Дубай: после порога, до старта
+const ALERT_AT = '2031-06-15T17:00:00Z';
+const NOW_DUE = '2031-06-15T17:30:00Z';
 
 // Отдельные party_id под каждый кейс, чтобы кейсы не мешали друг другу.
 const P_INJ = 'E2E_atk_gl_inj';
@@ -69,10 +69,10 @@ const seedParty = async (partyId: string, name: string, startAt: string) => {
         partyId,
         name,
     ]);
-    await dbQuery(`insert into party_time (party_id, party_start_at) values ($1,$2)`, [
-        partyId,
-        startAt,
-    ]);
+    await dbQuery(
+        `insert into party_time (party_id, party_start_at, guestlist_alert_at) values ($1,$2,$3)`,
+        [partyId, startAt, ALERT_AT],
+    );
 };
 
 const seedGuest = async (
@@ -234,20 +234,18 @@ describe('attack: jobs-guestlist', () => {
         assert.equal(marked.length, 2, 'оба гостя помечены');
     });
 
-    test('граница 21:00 Дубая: за секунду до порога — молчим, ровно в порог — шлём', async () => {
+    test('граница guestlist_alert_at: за секунду до порога — молчим, ровно в порог — шлём', async () => {
         await seedParty(P_EDGE, 'Edge Party', PARTY_START);
         await seedGuest(guestId(P_EDGE, 1), P_EDGE, 'Edge', 'Guest', null, '2031-06-10T10:00:00Z');
 
-        // Порог = 17:00Z (21:00 Дубай). За секунду до — 16:59:59Z.
         sent = [];
         await runTick(pool, CONFIG, '2031-06-15T16:59:59Z');
-        assert.equal(sent.length, 0, 'за секунду до 21:00 не шлём');
+        assert.equal(sent.length, 0, 'за секунду до порога не шлём');
         assert.equal(await alertedCount(P_EDGE), 0, 'ничего не помечено до порога');
 
-        // Ровно в порог — 14:00:00Z.
         sent = [];
         await runTick(pool, CONFIG, '2031-06-15T17:00:00Z');
-        assert.equal(sent.length, 1, 'ровно в 21:00 Дубая шлём');
+        assert.equal(sent.length, 1, 'ровно в порог шлём');
         assert.equal(await alertedCount(P_EDGE), 1, 'гость помечен');
     });
 

@@ -15,6 +15,7 @@ export interface GuestlistJobConfig {
 interface DuePartyRow {
     party_id: string;
     party_name: string;
+    alert_at_missing: boolean;
     already_alerted: boolean;
 }
 
@@ -30,28 +31,26 @@ const TICK_INTERVAL_MS = 60_000;
 const telegramResponse = z.object({ ok: z.boolean(), description: z.string().optional() });
 
 const selectDueParties = async (pool: pg.Pool, now: string | null) => {
-    // now === null в проде -> шлюз считается от now(); тесты подставляют фиксированное время.
-    // Порог = 21:00 по Дубаю календарного дня самой вечеринки; вечеринка ещё не началась.
     const result = await pool.query<DuePartyRow>(
         format(
             `with tick as (select coalesce(%L::timestamptz, now()) as now_at)
             select
                 p.id as party_id,
                 p.name as party_name,
+                t.alert_at_missing,
                 exists(
                     select 1 from party_guestlist a
                     where a.party_id = p.id and a.telegram_alert_at is not null
                 ) as already_alerted
             from party p
             join lateral (
-                select min(pt.party_start_at) as start_at
+                select
+                    min(pt.guestlist_alert_at) as alert_at,
+                    bool_or(pt.guestlist_alert_at is null) as alert_at_missing
                 from party_time pt
-                where pt.party_id = p.id and pt.party_start_at > (select now_at from tick)
+                where pt.party_id = p.id
             ) t on true
-            where t.start_at is not null
-                and (select now_at from tick) >= (
-                    date_trunc('day', t.start_at at time zone 'Asia/Dubai') + interval '21 hours'
-                ) at time zone 'Asia/Dubai'
+            where (t.alert_at_missing or (select now_at from tick) >= t.alert_at)
                 and exists(
                     select 1 from party_guestlist n
                     where n.party_id = p.id and n.telegram_alert_at is null
@@ -157,6 +156,11 @@ export const runTick = async (
 ) => {
     const parties = await selectDueParties(pool, now);
     for (const party of parties) {
+        if (party.alert_at_missing) {
+            throw new Error(
+                `party ${party.party_id}: party_time.guestlist_alert_at is null, set it`,
+            );
+        }
         const claimed = await claimGuests(pool, party.party_id);
         if (!claimed.length) {
             continue;
@@ -199,6 +203,7 @@ if (parentPort) {
             await runTick(pool, config);
         } catch (error) {
             console.error('[jobs] guestlist tick failed', error);
+            process.exit(1);
         }
     };
     void tick();

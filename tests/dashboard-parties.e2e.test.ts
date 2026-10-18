@@ -73,7 +73,7 @@ async function seed(): Promise<void> {
             );
             if (party.offset !== null) {
                 await client.query(
-                    `insert into party_time (party_id, party_start_at) values ($1, $2)`,
+                    `insert into party_time (party_id, party_start_at, guestlist_alert_at) values ($1, $2, $2)`,
                     [id, toDateTime(new Date(NOW + party.offset))],
                 );
             }

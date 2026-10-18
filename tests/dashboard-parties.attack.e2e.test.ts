@@ -69,14 +69,14 @@ async function seed(): Promise<void> {
             [ACTIVE_ID, 'Atk active', 'Atk loc'],
         );
         // Два party_time на одну party — проверяем что guestCount не раздувается и строка не двоится.
-        await client.query(`insert into party_time (party_id, party_start_at) values ($1, $2)`, [
-            ACTIVE_ID,
-            toDateTime(new Date(NOW - 2 * HOUR_MS)),
-        ]);
-        await client.query(`insert into party_time (party_id, party_start_at) values ($1, $2)`, [
-            ACTIVE_ID,
-            toDateTime(new Date(NOW - 1 * HOUR_MS)),
-        ]);
+        await client.query(
+            `insert into party_time (party_id, party_start_at, guestlist_alert_at) values ($1, $2, $2)`,
+            [ACTIVE_ID, toDateTime(new Date(NOW - 2 * HOUR_MS))],
+        );
+        await client.query(
+            `insert into party_time (party_id, party_start_at, guestlist_alert_at) values ($1, $2, $2)`,
+            [ACTIVE_ID, toDateTime(new Date(NOW - 1 * HOUR_MS))],
+        );
         const guestId = ulid();
         await client.query(
             `insert into guests (id, wa_phone, first_name, last_name, instagram)

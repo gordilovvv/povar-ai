@@ -67,10 +67,10 @@ const seed = async () => {
         `insert into party (id, type, name, location) values ($1,'owned','Neon Night','Dubai')`,
         [PARTY_ID],
     );
-    await dbQuery(`insert into party_time (party_id, party_start_at) values ($1,$2)`, [
-        PARTY_ID,
-        PARTY_START,
-    ]);
+    await dbQuery(
+        `insert into party_time (party_id, party_start_at, guestlist_alert_at) values ($1,$2,$2)`,
+        [PARTY_ID, PARTY_START],
+    );
     for (const [id, phone, first] of [
         [G_EARLY, `wa_${G_EARLY}`, 'Anna'],
         [G_LATE, `wa_${G_LATE}`, 'Boris'],
