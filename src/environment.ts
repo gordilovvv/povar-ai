@@ -9,6 +9,7 @@ export const environmentSchema = z.object({
     WA_PHONE_ID: z.string(),
     ANTHROPIC_API_KEY: z.string(),
     ANTHROPIC_MODEL: z.string(),
+    ANTHROPIC_GENDER_MODEL: z.string(),
     WA_SEND: z.enum(['on', 'off']),
     TEXT_AFTER_PAUSE_CHAT: z.enum(['on', 'off']),
     TELEGRAM_BOT_TOKEN: z.string(),

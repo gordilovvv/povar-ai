@@ -50,6 +50,7 @@ const seed = async () => {
             came_from: 'manual',
             came_at: toDateTime(new Date()),
             lang: null,
+            gender: null,
             instagram_asked_at: null,
         });
         const guestId = (await client.query('select id from guests where wa_phone = $1', [phone]))

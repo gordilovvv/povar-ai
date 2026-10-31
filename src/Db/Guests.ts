@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 import format from 'pg-format';
+import type { Gender } from '#Lib/Gender.js';
 
 type GuestCameFrom = 'ad' | 'manual' | 'party_invite';
 type GuestLang = 'ru' | 'en';
@@ -13,6 +14,7 @@ export interface GuestStorage {
     came_from: GuestCameFrom | null;
     came_at: string | null;
     lang: GuestLang | null;
+    gender: Gender | null;
     instagram_asked_at: string | null;
     marketing_enable: boolean;
 }

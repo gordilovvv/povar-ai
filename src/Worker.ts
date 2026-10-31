@@ -6,9 +6,10 @@ import {
     type WaMessageStorage,
 } from '#Db/WaMessages.js';
 import { Agent } from '#Intelligence/Agent.js';
+import { startGenderJob } from '#Jobs/Gender.js';
+import { startGuestConfirmJob } from '#Jobs/GuestConfirm.js';
 import { startGuestlistJob } from '#Jobs/Guestlist.js';
 import { startPauseAlertJob } from '#Jobs/PauseAlert.js';
-import { startGuestConfirmJob } from '#Jobs/GuestConfirm.js';
 import { toDateTime } from '#Lib/Fmt.js';
 import { Logger } from '#Lib/Logger.js';
 import { sleep } from '#Lib/Sleep.js';
@@ -109,6 +110,7 @@ void run();
 startGuestlistJob();
 startPauseAlertJob();
 startGuestConfirmJob();
+startGenderJob();
 
 process.on('SIGTERM', () => {
     running = false;

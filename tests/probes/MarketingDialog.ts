@@ -65,6 +65,7 @@ const seed = async () => {
             came_from: 'manual',
             came_at: toDateTime(now),
             lang: null,
+            gender: null,
             instagram_asked_at: null,
             marketing_enable: true,
         });

@@ -70,6 +70,7 @@ const seed = async (phone: string) => {
             came_from: 'manual',
             came_at: toDateTime(new Date()),
             lang: null,
+            gender: null,
             instagram_asked_at: null,
             marketing_enable: true,
         });
