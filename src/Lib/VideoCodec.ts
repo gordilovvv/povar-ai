@@ -5,9 +5,9 @@ import { join } from 'node:path';
 
 export const videoCodec = async (video: Blob): Promise<string> => {
     const dir = mkdtempSync(join(tmpdir(), 'video-codec-'));
-    const path = join(dir, 'video.mp4');
-    writeFileSync(path, Buffer.from(await video.arrayBuffer()));
     try {
+        const path = join(dir, 'video.mp4');
+        writeFileSync(path, Buffer.from(await video.arrayBuffer()));
         return execFileSync(
             'ffprobe',
             [
