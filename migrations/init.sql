@@ -35,7 +35,8 @@ create table guests (
     came_from text, -- ad | manual | party_invite
     came_at timestamp with time zone,
     lang text,
-    marketing_enable boolean not null default true
+    marketing_enable boolean not null default true,
+    gender text -- male | female
 );
 
 create table party_guestlist (

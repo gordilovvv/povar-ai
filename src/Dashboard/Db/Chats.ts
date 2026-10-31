@@ -149,6 +149,13 @@ export const updateChatPause = async (
     return result.rows.length > 0;
 };
 
+export const updateChatsPauseOff = async (client: PoolClient) => {
+    const result = await client.query(
+        `update wa_chats set paused_at = null, pause_details = null where paused_at is not null`,
+    );
+    return result.rowCount ?? 0;
+};
+
 export const selectChatsList = async (
     client: PoolClient,
     cursor: ChatsCursor | null,

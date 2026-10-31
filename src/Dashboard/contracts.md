@@ -99,3 +99,46 @@ item:  { id, name, location, startsAt, guestCount }[]
 GET /parties/:id/guestlist
 { firstName, lastName, instagram }[]
 ```
+
+## guestsGetStatistic [x]
+
+Счётчики гостей. `maleCount + femaleCount ≠ guestsCount`: у части гостей `gender` null.
+
+```
+GET /guests/statistic
+200:  { guestsCount, maleCount, femaleCount }
+```
+
+## guestsGetList [x]
+
+Список гостей, keyset по `id`. `nextCursor` нет — клиент берёт `id` последнего.
+
+```
+GET /guests
+query: limit (1..100, default 30, клампится), lastId (опц.)
+200:   { id, phone, firstName, lastName, instagram, gender: 'male' | 'female' | null }[]
+```
+
+## partyPost [x]
+
+Создать или полностью перезаписать вечеринку (upsert по `id`). Все поля, кроме `time`, приходят всегда. `time` задан → `party_time` заменяется; не задан → не трогаем. `marketing_message` и `party_tables` не трогаем.
+
+```
+POST /party
+body: {
+  id (слаг [a-z0-9_]), type: 'owned' | 'invited', name, price ≥0, location,
+  googleMapLink | null, reelsUrl | null, notes | null,
+  time?: { startsAt, endsAt, freeEntryBefore?, guestlistAlertAt? }   // ISO UTC
+}
+200:  { id }
+400:  невалидное тело / endsAt < startsAt
+```
+
+## chatsPostPauseOff [x]
+
+Снять паузу со всех чатов. `pause_alerted_at` не трогаем — как в одиночном `chatSetPause`.
+
+```
+POST /chats/pause/off
+200:  { affectedCount }
+```

@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 import format from 'pg-format';
+import { z } from 'zod';
 import type { PartiesKeyset } from '#Dashboard/Lib/PaginationCursor.js';
 
 export interface PartyListRow {
@@ -108,4 +109,81 @@ export const selectPartyGuestlist = async (client: PoolClient, partyId: string) 
         ),
     );
     return result.rows;
+};
+
+export const partyTypeSchema = z.enum(['owned', 'invited']);
+export type PartyType = z.infer<typeof partyTypeSchema>;
+
+export interface PartyStorage {
+    id: string;
+    type: PartyType;
+    name: string;
+    price: number;
+    location: string;
+    google_map_link: string | null;
+    reels_url: string | null;
+    notes: string | null;
+}
+
+export interface PartyTimeStorage {
+    party_id: string;
+    party_start_at: string;
+    party_end_at: string;
+    free_entry_before: string | null;
+    guestlist_alert_at: string | null;
+}
+
+export const insertParty = async (client: PoolClient, party: PartyStorage) => {
+    await client.query(
+        format(
+            `insert into party
+                (id, type, name, price, location, google_map_link, reels_url, notes)
+            values
+                (%L, %L, %L, %L, %L, %L, %L, %L)`,
+            party.id,
+            party.type,
+            party.name,
+            party.price,
+            party.location,
+            party.google_map_link,
+            party.reels_url,
+            party.notes,
+        ),
+    );
+};
+
+export const updateParty = async (client: PoolClient, party: PartyStorage) => {
+    await client.query(
+        format(
+            `update party
+                set type = %L, name = %L, price = %L, location = %L,
+                    google_map_link = %L, reels_url = %L, notes = %L
+            where id = %L`,
+            party.type,
+            party.name,
+            party.price,
+            party.location,
+            party.google_map_link,
+            party.reels_url,
+            party.notes,
+            party.id,
+        ),
+    );
+};
+
+export const replacePartyTime = async (client: PoolClient, time: PartyTimeStorage) => {
+    await client.query(
+        format(
+            `with removed as (delete from party_time where party_id = %1$L)
+            insert into party_time
+                (party_id, party_start_at, party_end_at, free_entry_before, guestlist_alert_at)
+            values
+                (%1$L, %2$L, %3$L, %4$L, %5$L)`,
+            time.party_id,
+            time.party_start_at,
+            time.party_end_at,
+            time.free_entry_before,
+            time.guestlist_alert_at,
+        ),
+    );
 };

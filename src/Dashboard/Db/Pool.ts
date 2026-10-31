@@ -1,6 +1,8 @@
 import { Pool } from 'pg';
 import { env } from '#Dashboard/environment.js';
 
+export const UNIQUE_ERROR_CODE = '23505';
+
 export const pool = new Pool({
     connectionString: env.DATABASE_URL,
     min: 0,
