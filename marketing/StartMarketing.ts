@@ -26,6 +26,7 @@ import { env } from '#environment.js';
 import { toDateTime } from '#Lib/Fmt.js';
 import { downloadFromS3 } from '#Lib/S3.js';
 import { sleep } from '#Lib/Sleep.js';
+import { videoCodec } from '#Lib/VideoCodec.js';
 import { Progress } from './Progress.js';
 import {
     appendCheckpoint,
@@ -51,6 +52,7 @@ const SEND_LIMIT = 2000;
 const MESSAGING_LIMIT_WINDOW_HOURS = 24;
 const WA_API_VERSION = 'v21.0';
 const TEMPLATE_NAME = 'party_invite';
+const WHATSAPP_VIDEO_CODEC = 'h264';
 const SEND_MAX_ATTEMPTS = 4;
 const TEST_PHONE = '79287546885';
 const TEST_PAUSE_MS = 30_000;
@@ -122,6 +124,15 @@ if (marketingFile instanceof Error) {
         `${RED}Стоп: афиша ${marketingMedia} не читается из S3 — ${marketingFile.message}${RESET}`,
     );
     process.exit(1);
+}
+if ('video' in marketingMessage.data) {
+    const codec = await videoCodec(marketingFile);
+    if (codec !== WHATSAPP_VIDEO_CODEC) {
+        console.error(
+            `${RED}Стоп: видео афиши в кодеке ${codec}, WhatsApp доставляет только ${WHATSAPP_VIDEO_CODEC} — перекодируй: ffmpeg -i in.mp4 -c:v libx264 -pix_fmt yuv420p -c:a aac -movflags +faststart out.mp4${RESET}`,
+        );
+        process.exit(1);
+    }
 }
 
 const partyDate = dayjs(party.party_start_at).tz(DUBAI_TZ).format('MMMM D (dddd)');
