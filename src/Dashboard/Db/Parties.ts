@@ -3,26 +3,35 @@ import format from 'pg-format';
 import { z } from 'zod';
 import type { PartiesKeyset } from '#Dashboard/Lib/PaginationCursor.js';
 
-export interface PartyListRow {
+export interface PartyRow {
     id: string;
     type: string;
     name: string;
     price: string | null;
     location: string;
+    google_map_link: string | null;
     reels_url: string | null;
     notes: string | null;
+    time_party_id: string | null;
     starts_at: string | null;
+    ends_at: string | null;
+    free_entry_before: string | null;
+    guestlist_alert_at: string | null;
     guest_count: string;
+}
+
+export interface PartyListRow extends PartyRow {
     bucket: number;
 }
 
 export interface GuestlistRow {
+    guest_id: string;
+    phone: string;
     first_name: string | null;
     last_name: string | null;
     instagram: string | null;
     friends: string[] | null;
     joined_at: string | null;
-    table_offered_at: string | null;
 }
 
 /**
@@ -46,13 +55,22 @@ export const selectPartiesList = async (
                     party.name,
                     party.price,
                     party.location,
+                    party.google_map_link,
                     party.reels_url,
                     party.notes,
-                    (select min(time.party_start_at)
-                        from party_time time where time.party_id = party.id) as starts_at,
+                    time.party_id as time_party_id,
+                    time.party_start_at as starts_at,
+                    time.party_end_at as ends_at,
+                    time.free_entry_before,
+                    time.guestlist_alert_at,
                     (select coalesce(sum(1 + coalesce(cardinality(guest.friends), 0)), 0)
                         from party_guestlist guest where guest.party_id = party.id) as guest_count
                 from party
+                left join lateral (
+                    select party_id, party_start_at, party_end_at, free_entry_before, guestlist_alert_at
+                    from party_time where party_id = party.id
+                    order by party_start_at asc limit 1
+                ) time on true
             ),
             ranked as (
                 select parties.*,
@@ -63,7 +81,7 @@ export const selectPartiesList = async (
                     end as bucket
                 from parties
             )
-            select id, type, name, price, location, reels_url, notes, starts_at, guest_count, bucket
+            select *
             from ranked
             where %L::int is null
                 or bucket < %L::int
@@ -96,11 +114,44 @@ export const selectPartiesList = async (
     return result.rows;
 };
 
+export const selectParty = async (client: PoolClient, partyId: string) => {
+    const result = await client.query<PartyRow>(
+        format(
+            `select
+                party.id,
+                party.type,
+                party.name,
+                party.price,
+                party.location,
+                party.google_map_link,
+                party.reels_url,
+                party.notes,
+                time.party_id as time_party_id,
+                time.party_start_at as starts_at,
+                time.party_end_at as ends_at,
+                time.free_entry_before,
+                time.guestlist_alert_at,
+                (select coalesce(sum(1 + coalesce(cardinality(guest.friends), 0)), 0)
+                    from party_guestlist guest where guest.party_id = party.id) as guest_count
+            from party
+            left join lateral (
+                select party_id, party_start_at, party_end_at, free_entry_before, guestlist_alert_at
+                from party_time where party_id = party.id
+                order by party_start_at asc limit 1
+            ) time on true
+            where party.id = %L`,
+            partyId,
+        ),
+    );
+    return result.rows.length ? result.rows[0] : null;
+};
+
 export const selectPartyGuestlist = async (client: PoolClient, partyId: string) => {
     const result = await client.query<GuestlistRow>(
         format(
-            `select guest.first_name, guest.last_name, guest.instagram,
-                list.friends, list.joined_at, list.table_offered_at
+            `select guest.id as guest_id, guest.wa_phone as phone,
+                guest.first_name, guest.last_name, guest.instagram,
+                list.friends, list.joined_at
             from party_guestlist list
             join guests guest on guest.id = list.guest_id
             where list.party_id = %L
@@ -130,7 +181,7 @@ export interface PartyTimeStorage {
     party_start_at: string;
     party_end_at: string;
     free_entry_before: string | null;
-    guestlist_alert_at: string | null;
+    guestlist_alert_at: string;
 }
 
 export const insertParty = async (client: PoolClient, party: PartyStorage) => {

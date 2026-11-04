@@ -1,13 +1,15 @@
-// Задача модуля (partiesGetListHandler + partyGetGuestlistListHandler):
-//   вход  → GET /parties?limit&cursor ; GET /parties/:id/guestlist
+// Задача модуля (partiesGetListHandler + partyGetHandler + partyGetGuestlistListHandler):
+//   вход  → GET /parties?limit&cursor ; GET /parties/:id ; GET /parties/:id/guestlist
 //           заголовок authorization: Bearer <access JWT> (гейт withAuthorization)
-//   выход → parties: { id, type, name, price, location, reelsUrl, notes, startsAt, guestCount (гости + friends) }[], nextCursor
+//   выход → parties: { id, type, name, price, location, googleMapLink, reelsUrl, notes, startsAt,
+//                      guestCount (гости + friends), time: { startsAt, endsAt, freeEntryBefore, guestlistAlertAt } | null }[], nextCursor
 //           сорт: активная (идёт сейчас, ≤ ACTIVE_PARTY_WINDOW_HOURS после старта) →
 //                 будущие (asc) → прошедшие (desc) → без времени (последними)
-//           guestlist: { firstName, lastName, instagram, friends, joinedAt, tableOfferedAt }[] по joined_at asc
+//           party: те же поля без startsAt; нет вечеринки → 404
+//           guestlist: { guestId, phone, firstName, lastName, instagram, friends, joinedAt }[] по joined_at asc
 //   бюджет → сеть/БД жёстко не меряем (ориентир p95 ≤ 150ms), только measure()
 //   негатив → нет/битый токен → 401; пустой id → 400 (в .attack);
-//             несуществующий party в guestlist → 200 []
+//             несуществующий party в guestlist → 200 []; в GET /parties/:id → 404
 
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
@@ -44,6 +46,9 @@ const EXPECTED_ORDER = ['ongoing', 'future1', 'future2', 'past1', 'past2', 'noti
     (k) => ID.get(k) ?? '',
 );
 const GUEST_PHONES = ['E2E_ptg_0', 'E2E_ptg_1'];
+const GUEST_IDS = [ulid(), ulid()];
+const END_OFFSET = 6 * HOUR_MS;
+const ALERT_OFFSET = -3 * HOUR_MS;
 
 async function cleanup(): Promise<void> {
     await withClient(async (client) => {
@@ -60,21 +65,28 @@ async function seed(): Promise<void> {
         for (const party of PARTIES) {
             const id = ID.get(party.key) ?? '';
             await client.query(
-                `insert into party (id, type, name, price, location, reels_url, notes)
-                 values ($1, 'owned', $2, $3, $4, $5, $6)`,
+                `insert into party (id, type, name, price, location, google_map_link, reels_url, notes)
+                 values ($1, 'owned', $2, $3, $4, $5, $6, $7)`,
                 [
                     id,
                     `Party ${party.key}`,
                     party.key === 'ongoing' ? 1500 : null,
                     `Loc ${party.key}`,
+                    party.key === 'ongoing' ? 'https://maps/ongoing' : null,
                     `https://reels/${party.key}`,
                     `note ${party.key}`,
                 ],
             );
             if (party.offset !== null) {
                 await client.query(
-                    `insert into party_time (party_id, party_start_at, guestlist_alert_at) values ($1, $2, $2)`,
-                    [id, toDateTime(new Date(NOW + party.offset))],
+                    `insert into party_time (party_id, party_start_at, party_end_at, guestlist_alert_at)
+                     values ($1, $2, $3, $4)`,
+                    [
+                        id,
+                        toDateTime(new Date(NOW + party.offset)),
+                        toDateTime(new Date(NOW + party.offset + END_OFFSET)),
+                        toDateTime(new Date(NOW + party.offset + ALERT_OFFSET)),
+                    ],
                 );
             }
         }
@@ -85,7 +97,7 @@ async function seed(): Promise<void> {
         const FRIENDS = [['Ann Smith', 'Bob Lee'], null];
         const OFFERED = [toDateTime(new Date(NOW)), null];
         for (let i = 0; i < 2; i++) {
-            const guestId = ulid();
+            const guestId = GUEST_IDS[i];
             await client.query(
                 `insert into guests (id, wa_phone, first_name, last_name, instagram)
                  values ($1, $2, $3, $4, $5)`,
@@ -100,29 +112,48 @@ async function seed(): Promise<void> {
     });
 }
 
+interface PartyTime {
+    startsAt: string | null;
+    endsAt: string | null;
+    freeEntryBefore: string | null;
+    guestlistAlertAt: string | null;
+}
+
+interface PartyItem {
+    id: string;
+    type: string;
+    name: string;
+    price: number | null;
+    location: string;
+    googleMapLink: string | null;
+    reelsUrl: string | null;
+    notes: string | null;
+    guestCount: number;
+    time: PartyTime | null;
+}
+
 interface PartiesResponse {
-    items: {
-        id: string;
-        type: string;
-        name: string;
-        price: number | null;
-        location: string;
-        reelsUrl: string | null;
-        notes: string | null;
-        startsAt: string | null;
-        guestCount: number;
-    }[];
+    items: (PartyItem & { startsAt: string | null })[];
     nextCursor: string | null;
 }
 
 type GuestlistResponse = {
+    guestId: string;
+    phone: string;
     firstName: string | null;
     lastName: string | null;
     instagram: string | null;
     friends: string[];
     joinedAt: string | null;
-    tableOfferedAt: string | null;
 }[];
+
+const isoSec = (ms: number) => new Date(Math.floor(ms / 1000) * 1000).toISOString();
+const ONGOING_TIME: PartyTime = {
+    startsAt: isoSec(NOW - 2 * HOUR_MS),
+    endsAt: isoSec(NOW - 2 * HOUR_MS + END_OFFSET),
+    freeEntryBefore: null,
+    guestlistAlertAt: isoSec(NOW - 2 * HOUR_MS + ALERT_OFFSET),
+};
 
 let token = '';
 
@@ -191,6 +222,9 @@ describe('e2e: dashboard partiesGetList + partyGetGuestlistList', () => {
             null,
             'price null → null (не 0/NaN)',
         );
+        assert.equal(ongoing?.googleMapLink, 'https://maps/ongoing', 'googleMapLink отдаётся');
+        assert.deepEqual(ongoing?.time, ONGOING_TIME, 'time: все 4 поля из party_time');
+        assert.equal(byId.get(ID.get('notime') ?? '')?.time, null, 'без party_time → time null');
 
         // Сверка guestCount напрямую с БД.
         const dbRow = await dbOne<{ n: string }>(
@@ -236,7 +270,59 @@ describe('e2e: dashboard partiesGetList + partyGetGuestlistList', () => {
         assert.deepEqual(mineOrder, EXPECTED_ORDER, 'keyset выдаёт мои вечеринки в верном порядке');
     });
 
-    it('guestlist: { firstName, lastName, instagram, friends, joinedAt, tableOfferedAt }[] по joined_at asc', async () => {
+    it('party: GET /parties/:id отдаёт все поля и time; сверка с БД', async () => {
+        const { result } = await measure('GET /parties/:id', () =>
+            dashboardFetch(
+                new Request(
+                    `http://dashboard/parties/${encodeURIComponent(ID.get('ongoing') ?? '')}`,
+                    {
+                        headers: { authorization: `Bearer ${token}` },
+                    },
+                ),
+            ),
+        );
+        assert.equal(result.status, 200);
+        const body = (await result.json()) as PartyItem;
+        assert.deepEqual(body, {
+            id: ID.get('ongoing'),
+            type: 'owned',
+            name: 'Party ongoing',
+            price: 1500,
+            location: 'Loc ongoing',
+            googleMapLink: 'https://maps/ongoing',
+            reelsUrl: 'https://reels/ongoing',
+            notes: 'note ongoing',
+            guestCount: 4,
+            time: ONGOING_TIME,
+        });
+
+        const dbRow = await dbOne<{ start: Date; n: string }>(
+            `select t.party_start_at as start,
+                (select sum(1 + coalesce(cardinality(g.friends), 0))::text from party_guestlist g where g.party_id = p.id) as n
+             from party p join party_time t on t.party_id = p.id where p.id = $1`,
+            [ID.get('ongoing') ?? ''],
+        );
+        assert.equal(body.time?.startsAt, dbRow?.start.toISOString(), 'time.startsAt = факт БД');
+        assert.equal(String(body.guestCount), dbRow?.n, 'guestCount = факт БД');
+    });
+
+    it('party: без party_time → time null; несуществующий id → 404', async () => {
+        const headers = { authorization: `Bearer ${token}` };
+        const notime = await dashboardFetch(
+            new Request(`http://dashboard/parties/${encodeURIComponent(ID.get('notime') ?? '')}`, {
+                headers,
+            }),
+        );
+        assert.equal(notime.status, 200);
+        assert.equal(((await notime.json()) as PartyItem).time, null);
+
+        const missing = await dashboardFetch(
+            new Request('http://dashboard/parties/E2E_pt_missing', { headers }),
+        );
+        assert.equal(missing.status, 404);
+    });
+
+    it('guestlist: { guestId, phone, firstName, lastName, instagram, friends, joinedAt }[] по joined_at asc', async () => {
         const { result } = await measure('GET /parties/:id/guestlist', () =>
             dashboardFetch(
                 new Request(
@@ -256,23 +342,25 @@ describe('e2e: dashboard partiesGetList + partyGetGuestlistList', () => {
             body,
             [
                 {
+                    guestId: GUEST_IDS[0],
+                    phone: GUEST_PHONES[0],
                     firstName: 'First0',
                     lastName: 'Last0',
                     instagram: 'https://insta/0',
                     friends: ['Ann Smith', 'Bob Lee'],
                     joinedAt: joinedAt(0),
-                    tableOfferedAt: new Date(Math.floor(NOW / 1000) * 1000).toISOString(),
                 },
                 {
+                    guestId: GUEST_IDS[1],
+                    phone: GUEST_PHONES[1],
                     firstName: 'First1',
                     lastName: 'Last1',
                     instagram: 'https://insta/1',
                     friends: [],
                     joinedAt: joinedAt(1),
-                    tableOfferedAt: null,
                 },
             ],
-            'гости по joined_at asc: friends (null→[]), joinedAt, tableOfferedAt',
+            'гости по joined_at asc: guestId, phone, friends (null→[]), joinedAt',
         );
     });
 

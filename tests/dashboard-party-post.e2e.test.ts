@@ -1,10 +1,12 @@
 // Задача модуля (partyPostHandler):
 //   вход  → POST /party (Bearer JWT, гейт withAuthorization)
 //           body { id, type, name, price ≥0, location, googleMapLink|null, reelsUrl|null, notes|null,
-//                  time?: { startsAt, endsAt, freeEntryBefore?, guestlistAlertAt? } }  ISO UTC
+//                  time?: { startsAt, endsAt, freeEntryBefore?, guestlistAlertAt } }  ISO UTC
 //   выход → { id }; upsert party (insert → на 23505 update, полная перезапись полей);
 //           time задан → party_time ровно одна строка с новыми значениями; не задан → не трогаем;
-//           marketing_message и party_tables не трогаем
+//           marketing_message и party_tables не трогаем;
+//           GET /parties/:id после POST отдаёт все поля тела + guestCount; повтор с теми же
+//           полями и новым именем не меняет googleMapLink и time
 //   бюджет → сеть/БД не меряем, только measure()
 //   негатив → endsAt < startsAt → 400 без записи; параллельные POST одного id → 1 party, 1 party_time;
 //             auth / кривое тело — в .attack
@@ -36,7 +38,11 @@ const TIME_V1 = {
     freeEntryBefore: '2026-12-01T20:00:00.000Z',
     guestlistAlertAt: '2026-12-01T14:00:00.000Z',
 };
-const TIME_V2 = { startsAt: '2026-12-05T19:00:00.000Z', endsAt: '2026-12-06T03:00:00.000Z' };
+const TIME_V2 = {
+    startsAt: '2026-12-05T19:00:00.000Z',
+    endsAt: '2026-12-06T03:00:00.000Z',
+    guestlistAlertAt: '2026-12-05T15:00:00.000Z',
+};
 
 const BODY_V1 = {
     id: PARTY_ID,
@@ -77,6 +83,17 @@ async function post(body: unknown): Promise<Response> {
                 method: 'POST',
                 headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
                 body: JSON.stringify(body),
+            }),
+        ),
+    );
+    return result;
+}
+
+async function getParty(id: string): Promise<Response> {
+    const { result } = await measure('GET /parties/:id', () =>
+        dashboardFetch(
+            new Request(`http://dashboard/parties/${encodeURIComponent(id)}`, {
+                headers: { authorization: `Bearer ${token}` },
             }),
         ),
     );
@@ -148,6 +165,27 @@ describe('e2e: dashboard partyPost', () => {
         );
     });
 
+    it('e2e: partyPost → GET /parties/:id отдаёт все поля; повтор с новым именем не меняет карту и время', async () => {
+        const { id: _id, ...fields } = BODY_V1;
+        const expected = { id: PARTY_ID, ...fields, guestCount: 0, time: TIME_V1 };
+
+        const first = await getParty(PARTY_ID);
+        assert.equal(first.status, 200);
+        assert.deepEqual(await first.json(), expected, 'GET после создания = тело POST');
+
+        const res = await post({ ...BODY_V1, name: 'E2E Party renamed' });
+        assert.equal(res.status, 200);
+
+        const second = await getParty(PARTY_ID);
+        assert.equal(second.status, 200);
+        assert.deepEqual(
+            await second.json(),
+            { ...expected, name: 'E2E Party renamed' },
+            'сменилось только имя: googleMapLink и time прежние',
+        );
+        assert.equal((await selectTimes(PARTY_ID)).length, 1, 'party_time по-прежнему одна');
+    });
+
     it('e2e: partyPost — повтор: полная перезапись, время заменено, marketing/tables целы', async () => {
         const marketing = { image: 'e2e.jpg', message: 'e2e invite' };
         await withClient(async (client) => {
@@ -193,7 +231,7 @@ describe('e2e: dashboard partyPost', () => {
                 freeEntryBefore: iso(times[0].free_entry_before),
                 guestlistAlertAt: iso(times[0].guestlist_alert_at),
             },
-            { ...TIME_V2, freeEntryBefore: null, guestlistAlertAt: null },
+            { ...TIME_V2, freeEntryBefore: null },
         );
         const tables = await dbQuery(`select map from party_tables where party_id = $1`, [
             PARTY_ID,

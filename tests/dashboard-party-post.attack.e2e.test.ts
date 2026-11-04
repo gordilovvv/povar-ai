@@ -2,7 +2,7 @@
 // Контракт (из задачи):
 //   auth: нет/битый/протухший/чужая подпись/удалённый юзер → 401, в БД ничего не записано;
 //   400: не-JSON, нет ключей, неверные типы, price < 0, кривой enum, кривой slug (SQL-мета, upper),
-//        невалидный ISO, endsAt < startsAt — и в БД ничего (ни party, ни party_time);
+//        невалидный ISO, endsAt < startsAt, time без guestlistAlertAt — и в БД ничего (ни party, ни party_time);
 //   инъекции в текстовых полях хранятся как есть, таблицы целы;
 //   параллельные POST одного id (новый и существующий, с разным time) → ровно 1 party и 1 party_time;
 //   marketing_message и party_tables не трогаются.
@@ -32,7 +32,11 @@ const RACE_OLD_ID = `e2e_atk_pp_rold_${RUN}`;
 const RACE_MIX_ID = `e2e_atk_pp_rmix_${RUN}`;
 const OWN_IDS = [AUTH_ID, BAD_ID, INJ_ID, RACE_NEW_ID, RACE_OLD_ID, RACE_MIX_ID];
 
-const TIME = { startsAt: '2026-12-01T18:00:00.000Z', endsAt: '2026-12-02T02:00:00.000Z' };
+const TIME = {
+    startsAt: '2026-12-01T18:00:00.000Z',
+    endsAt: '2026-12-02T02:00:00.000Z',
+    guestlistAlertAt: '2026-12-01T14:00:00.000Z',
+};
 const BODY = {
     id: BAD_ID,
     type: 'owned',
@@ -56,9 +60,7 @@ function jwtSecret(): string {
 async function postRaw(body: string, auth: string | null = `Bearer ${token}`): Promise<Response> {
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (auth !== null) headers.authorization = auth;
-    return dashboardFetch(
-        new Request('http://dashboard/party', { method: 'POST', headers, body }),
-    );
+    return dashboardFetch(new Request('http://dashboard/party', { method: 'POST', headers, body }));
 }
 
 const post = (body: unknown, auth?: string | null) => postRaw(JSON.stringify(body), auth);
@@ -156,16 +158,22 @@ describe('attack: dashboard partyPost', () => {
                 'freeEntryBefore garbage',
                 { ...BODY, time: { ...TIME, freeEntryBefore: '2026-13-01T00:00:00Z' } },
             ],
-            ['guestlistAlertAt null', { ...BODY, time: { ...TIME, guestlistAlertAt: 123 } }],
+            ['guestlistAlertAt number', { ...BODY, time: { ...TIME, guestlistAlertAt: 123 } }],
+            ['guestlistAlertAt null', { ...BODY, time: { ...TIME, guestlistAlertAt: null } }],
+            [
+                'time no guestlistAlertAt',
+                { ...BODY, time: { startsAt: TIME.startsAt, endsAt: TIME.endsAt } },
+            ],
             [
                 'endsAt < startsAt',
-                { ...BODY, time: { startsAt: TIME.endsAt, endsAt: TIME.startsAt } },
+                { ...BODY, time: { ...TIME, startsAt: TIME.endsAt, endsAt: TIME.startsAt } },
             ],
             [
                 'endsAt < startsAt внутри секунды',
                 {
                     ...BODY,
                     time: {
+                        ...TIME,
                         startsAt: '2026-12-01T18:00:00.900Z',
                         endsAt: '2026-12-01T18:00:00.100Z',
                     },
@@ -246,6 +254,7 @@ describe('attack: dashboard partyPost', () => {
         Array.from({ length: n }, (_, i) => ({
             startsAt: `2026-12-${String(i + 1).padStart(2, '0')}T18:00:00.000Z`,
             endsAt: `2026-12-${String(i + 1).padStart(2, '0')}T23:00:00.000Z`,
+            guestlistAlertAt: `2026-12-${String(i + 1).padStart(2, '0')}T12:00:00.000Z`,
         }));
 
     async function assertRace(

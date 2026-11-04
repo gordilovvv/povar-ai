@@ -12,10 +12,19 @@ interface PartyListItem {
     name: string;
     price: number | null;
     location: string;
+    googleMapLink: string | null;
     reelsUrl: string | null;
     notes: string | null;
     startsAt: string | null;
     guestCount: number;
+    time: PartyTime | null;
+}
+
+interface PartyTime {
+    startsAt: string | null;
+    endsAt: string | null;
+    freeEntryBefore: string | null;
+    guestlistAlertAt: string | null;
 }
 
 export const partiesGetListHandler: RequestHandler<IRequest> = async (request) => {
@@ -48,10 +57,20 @@ export const partiesGetListHandler: RequestHandler<IRequest> = async (request) =
             name: row.name,
             price: row.price === null ? null : Number(row.price),
             location: row.location,
+            googleMapLink: row.google_map_link,
             reelsUrl: row.reels_url,
             notes: row.notes,
             startsAt: fromDateTime(row.starts_at),
             guestCount: Number(row.guest_count),
+            time:
+                row.time_party_id === null
+                    ? null
+                    : {
+                          startsAt: fromDateTime(row.starts_at),
+                          endsAt: fromDateTime(row.ends_at),
+                          freeEntryBefore: fromDateTime(row.free_entry_before),
+                          guestlistAlertAt: fromDateTime(row.guestlist_alert_at),
+                      },
         });
     }
 

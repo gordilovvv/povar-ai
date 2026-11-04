@@ -34,7 +34,7 @@ const bodySchema = z.object({
             startsAt: isoUtc,
             endsAt: isoUtc,
             freeEntryBefore: isoUtc.optional(),
-            guestlistAlertAt: isoUtc.optional(),
+            guestlistAlertAt: isoUtc,
         })
         .refine((time) => Date.parse(time.endsAt) >= Date.parse(time.startsAt))
         .optional(),
@@ -84,9 +84,7 @@ export const partyPostHandler: RequestHandler<IRequest> = async (request) => {
                 free_entry_before: body.time.freeEntryBefore
                     ? toDateTime(body.time.freeEntryBefore)
                     : null,
-                guestlist_alert_at: body.time.guestlistAlertAt
-                    ? toDateTime(body.time.guestlistAlertAt)
-                    : null,
+                guestlist_alert_at: toDateTime(body.time.guestlistAlertAt),
             });
         }
         await client.query('commit');
