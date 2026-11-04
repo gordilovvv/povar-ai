@@ -5,6 +5,8 @@ import { badRequest, notFound } from '#Dashboard/Lib/Response.js';
 import { safeParseString } from '#Lib/Fmt.js';
 import { downloadWhatsappMedia } from '#Platforms/Whatsapp/index.js';
 
+const INLINE_MIME = /^(image\/(?!svg)|video\/|audio\/)/i;
+
 export const mediaGetHandler: RequestHandler<IRequest> = async (request) => {
     const mediaId = safeParseString(request.params.id);
     if (mediaId === null) {
@@ -29,7 +31,14 @@ export const mediaGetHandler: RequestHandler<IRequest> = async (request) => {
         return notFound();
     }
 
+    // Документ от гостя может быть text/html или svg — inline на домене API он отрендерится.
+    const inline = INLINE_MIME.test(media.mimeType);
     return new Response(media.bytes, {
-        headers: { 'content-type': media.mimeType, 'cache-control': 'no-store' },
+        headers: {
+            'content-type': media.mimeType,
+            'content-disposition': inline ? 'inline' : 'attachment',
+            'x-content-type-options': 'nosniff',
+            'cache-control': 'no-store',
+        },
     });
 };

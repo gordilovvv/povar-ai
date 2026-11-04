@@ -2,17 +2,25 @@ import type { IRequest, RequestHandler } from 'itty-router';
 import { type ChatMessageRow, selectChatMessages } from '#Dashboard/Db/Chats.js';
 import { pool } from '#Dashboard/Db/Pool.js';
 import { badRequest, success } from '#Dashboard/Lib/Response.js';
+import { type WaMessageOwner, waMessageOwnerSchema } from '#Db/WaMessages.js';
 import { fromDateTime, minMax, safeParseInt, safeParseString } from '#Lib/Fmt.js';
 
 interface ChatMessageItem {
     id: string;
     text: string | null;
-    owner: 'user' | 'bot';
+    owner: 'user' | 'bot' | 'marketing';
     status: string | null;
     sentAt: string | null;
     mediaType: string | null;
     mediaId: string | null;
 }
+
+const OWNER_BY_ROW: Record<WaMessageOwner, ChatMessageItem['owner']> = {
+    guest: 'user',
+    sema: 'bot',
+    ai: 'bot',
+    marketing: 'marketing',
+};
 
 export const chatGetMessagesHandler: RequestHandler<IRequest> = async (request) => {
     const phone = safeParseString(request.params.phone);
@@ -35,7 +43,7 @@ export const chatGetMessagesHandler: RequestHandler<IRequest> = async (request) 
         items.push({
             id: row.id,
             text: row.text,
-            owner: row.owner === 'sema' ? 'bot' : 'user',
+            owner: OWNER_BY_ROW[waMessageOwnerSchema.parse(row.owner)],
             status: row.status,
             sentAt: fromDateTime(row.sent_at),
             mediaType: row.media_type,

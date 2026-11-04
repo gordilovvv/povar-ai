@@ -94,6 +94,7 @@ const handleWebhook: RequestHandler = async (request) => {
                     status: 'delivered',
                     concurrency_version: 0,
                     sent_at: now,
+                    ...(media ? { media_type: message.type, media_id: media.id } : {}),
                 });
             } catch (error) {
                 if ((error as { code?: string }).code !== UNIQUE_ERROR_CODE) {

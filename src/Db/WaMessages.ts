@@ -17,7 +17,7 @@ export const waMessageOwnerSchema = z.enum(['ai', 'guest', 'marketing', 'sema'])
 
 type WaMessageStatus = z.infer<typeof waMessageStatusSchema>;
 type WaWorkerStatus = z.infer<typeof waWorkerStatusSchema>;
-type WaMessageOwner = z.infer<typeof waMessageOwnerSchema>;
+export type WaMessageOwner = z.infer<typeof waMessageOwnerSchema>;
 
 export const waMessageStatusRank: Record<WaMessageStatus, number> = Object.fromEntries(
     waMessageStatusSchema.options.map((status, index) => [status, index]),
@@ -70,11 +70,11 @@ export const insertIncomingWaMessage = async (
     await client.query(
         format(
             `insert into wa_messages
-                (id, wa_message_id, wa_chat_phone, text, owner, status, worker_status, concurrency_version, sent_at)
+                (id, wa_message_id, wa_chat_phone, text, owner, status, worker_status, concurrency_version, sent_at, media_type, media_id)
             select
                 %L, %L, %L, %L, %L, %L,
                 case when paused_at is null then %L else %L end,
-                %L, %L
+                %L, %L, %L, %L
             from wa_chats where wa_phone = %L`,
             message.id,
             message.wa_message_id,
@@ -86,6 +86,8 @@ export const insertIncomingWaMessage = async (
             waWorkerStatusSchema.enum.skipped,
             message.concurrency_version,
             toDateTime(message.sent_at),
+            message.media_type ?? null,
+            message.media_id ?? null,
             message.wa_chat_phone,
         ),
     );

@@ -2,8 +2,9 @@
 //   вход  → GET /chats/:phone ; GET /chats/:phone/messages?limit&cursor
 //           заголовок authorization: Bearer <access JWT> (гейт withAuthorization)
 //   выход → chat: { phone, userName, lastMessageAt, lastUserMessageAt, lastBotMessageAt, pausedAt, pauseDetails }
-//           messages: { id, text, owner: 'user'|'bot', status, sentAt }[], nextCursor
-//           messages по id desc (ULID), keyset по id; owner: guest→user, sema→bot
+//           messages: { id, text, owner: 'user'|'bot'|'marketing', status, sentAt, mediaType, mediaId }[], nextCursor
+//           messages по id desc (ULID), keyset по id; owner: guest→user, sema→bot, marketing→marketing
+//           mediaType/mediaId отдаются как лежат в wa_messages (входящие медиа гостя тоже)
 //           chats list (GET /chats): item.paused = (paused_at is not null)
 //   бюджет → сеть/БД жёстко не меряем (ориентир p95 ≤ 150ms), только measure()
 //   негатив → нет/битый токен → 401; несуществующий чат → 404 (chat), 200 [] (messages);
@@ -14,6 +15,7 @@ import { after, before, describe, it } from 'node:test';
 import { ulid } from 'ulid';
 import { pool as dashboardPool } from '#Dashboard/Db/Pool.js';
 import { dashboardFetch } from '#Dashboard/Router.js';
+import { insertIncomingWaMessage } from '#Db/WaMessages.js';
 import { toDateTime } from '#Lib/Fmt.js';
 import {
     closePool,
@@ -28,6 +30,8 @@ import {
 const DASH_PHONE = 'E2E_chatget_user';
 const CHAT_PHONE = 'E2E_cg_0001';
 const EMPTY_CHAT = 'E2E_cg_empty';
+const INCOMING_CHAT = 'E2E_cg_incoming';
+const INCOMING_MEDIA_ID = 'E2E_cg_media_0002';
 const PAUSED_CHAT = 'E2E_cg_paused';
 const PAUSED_AT = '2030-03-01T09:00:00.000Z';
 const PAUSE_DETAILS = 'гость просит скидку';
@@ -36,7 +40,17 @@ const LAST_RECEIVED = '2030-03-01T10:00:05.000Z';
 const LAST_SENT = '2030-03-01T10:00:09.000Z';
 
 // Сообщения: id = ulid(ts) по возрастанию → в выдаче (id desc) новейшее первым.
+const GUEST_MEDIA_ID = 'E2E_cg_media_0001';
 const MESSAGES = [
+    { at: '2030-03-01T09:59:00.000Z', owner: 'marketing', status: 'read', text: 'приглашение' },
+    {
+        at: '2030-03-01T09:59:30.000Z',
+        owner: 'guest',
+        status: 'delivered',
+        text: null,
+        mediaType: 'image',
+        mediaId: GUEST_MEDIA_ID,
+    },
     { at: '2030-03-01T10:00:00.000Z', owner: 'guest', status: 'delivered', text: 'привет' },
     { at: '2030-03-01T10:00:03.000Z', owner: 'sema', status: 'read', text: 'здравствуй' },
     { at: '2030-03-01T10:00:05.000Z', owner: 'guest', status: 'read', text: 'как дела' },
@@ -48,10 +62,10 @@ const ORDER_DESC = [...IDS].reverse();
 async function cleanup(): Promise<void> {
     await withClient(async (client) => {
         await client.query(`delete from wa_messages where wa_chat_phone = any($1)`, [
-            [CHAT_PHONE, EMPTY_CHAT, PAUSED_CHAT],
+            [CHAT_PHONE, EMPTY_CHAT, PAUSED_CHAT, INCOMING_CHAT],
         ]);
         await client.query(`delete from wa_chats where wa_phone = any($1)`, [
-            [CHAT_PHONE, EMPTY_CHAT, PAUSED_CHAT],
+            [CHAT_PHONE, EMPTY_CHAT, PAUSED_CHAT, INCOMING_CHAT],
         ]);
         await client.query(`delete from guests where wa_phone = any($1)`, [
             [CHAT_PHONE, EMPTY_CHAT, PAUSED_CHAT],
@@ -80,8 +94,8 @@ async function seed(): Promise<void> {
         for (let i = 0; i < MESSAGES.length; i++) {
             const msg = MESSAGES[i];
             await client.query(
-                `insert into wa_messages (id, wa_chat_phone, text, owner, status, sent_at)
-                 values ($1, $2, $3, $4, $5, $6)`,
+                `insert into wa_messages (id, wa_chat_phone, text, owner, status, sent_at, media_type, media_id)
+                 values ($1, $2, $3, $4, $5, $6, $7, $8)`,
                 [
                     IDS[i],
                     CHAT_PHONE,
@@ -89,12 +103,29 @@ async function seed(): Promise<void> {
                     msg?.owner,
                     msg?.status,
                     toDateTime(new Date(msg?.at ?? 0)),
+                    msg?.mediaType ?? null,
+                    msg?.mediaId ?? null,
                 ],
             );
         }
 
         // Пустой чат (без guest, без сообщений) — для userName=null и messages=[].
         await client.query(`insert into wa_chats (wa_phone) values ($1)`, [EMPTY_CHAT]);
+
+        // Входящее медиа без подписи тем же путём, что Webhook.
+        await client.query(`insert into wa_chats (wa_phone) values ($1)`, [INCOMING_CHAT]);
+        await insertIncomingWaMessage(client, {
+            id: ulid(),
+            wa_message_id: `wamid.${INCOMING_MEDIA_ID}`,
+            wa_chat_phone: INCOMING_CHAT,
+            text: null,
+            owner: 'guest',
+            status: 'delivered',
+            concurrency_version: 0,
+            sent_at: new Date('2030-03-01T10:01:00.000Z'),
+            media_type: 'image',
+            media_id: INCOMING_MEDIA_ID,
+        });
 
         // Чат на паузе — для pausedAt/pauseDetails в детали и paused=true в списке.
         await client.query(
@@ -124,9 +155,11 @@ interface MessagesResponse {
     items: {
         id: string;
         text: string | null;
-        owner: 'user' | 'bot';
+        owner: 'user' | 'bot' | 'marketing';
         status: string | null;
         sentAt: string | null;
+        mediaType: string | null;
+        mediaId: string | null;
     }[];
     nextCursor: string | null;
 }
@@ -282,7 +315,7 @@ describe('e2e: dashboard chatGet + chatGetMessages', () => {
         assert.equal(foundPaused.get(PAUSED_CHAT), true, 'паузнутый → paused true');
     });
 
-    it('messages: все сообщения по id desc, owner guest→user / sema→bot, sentAt ISO', async () => {
+    it('messages: все сообщения по id desc, owner guest→user / sema→bot / marketing→marketing, медиа гостя, sentAt ISO', async () => {
         const res = await getMessages(CHAT_PHONE, '?limit=100');
         assert.equal(res.status, 200);
         const body = (await res.json()) as MessagesResponse;
@@ -295,16 +328,40 @@ describe('e2e: dashboard chatGet + chatGetMessages', () => {
         );
 
         const byId = new Map(mine.map((m) => [m.id, m]));
-        assert.equal(byId.get(IDS[0] ?? '')?.owner, 'user', 'guest → user');
-        assert.equal(byId.get(IDS[1] ?? '')?.owner, 'bot', 'sema → bot');
-        assert.equal(byId.get(IDS[0] ?? '')?.text, 'привет', 'text отдаётся as-is');
-        assert.equal(byId.get(IDS[3] ?? '')?.status, 'sent', 'status passthrough');
+        assert.equal(byId.get(IDS[2] ?? '')?.owner, 'user', 'guest → user');
+        assert.equal(byId.get(IDS[3] ?? '')?.owner, 'bot', 'sema → bot');
+        assert.equal(byId.get(IDS[0] ?? '')?.owner, 'marketing', 'marketing → marketing');
+        assert.equal(byId.get(IDS[1] ?? '')?.owner, 'user', 'медиа гостя → user');
+        assert.equal(byId.get(IDS[1] ?? '')?.text, null, 'медиа без подписи → text null');
+        assert.equal(byId.get(IDS[1] ?? '')?.mediaType, 'image', 'mediaType входящего медиа');
+        assert.equal(byId.get(IDS[1] ?? '')?.mediaId, GUEST_MEDIA_ID, 'mediaId входящего медиа');
+        assert.equal(byId.get(IDS[2] ?? '')?.mediaType, null, 'текст → mediaType null');
+        assert.equal(byId.get(IDS[2] ?? '')?.text, 'привет', 'text отдаётся as-is');
+        assert.equal(byId.get(IDS[5] ?? '')?.status, 'sent', 'status passthrough');
         assert.equal(
-            byId.get(IDS[3] ?? '')?.sentAt,
+            byId.get(IDS[5] ?? '')?.sentAt,
             '2030-03-01T10:00:09.000Z',
             'sentAt в ISO UTC',
         );
         assert.equal(body.nextCursor, null, 'все влезли — nextCursor null');
+    });
+
+    it('messages: входящее медиа через insertIncomingWaMessage → mediaType/mediaId в ленте и в БД', async () => {
+        const res = await getMessages(INCOMING_CHAT, '');
+        assert.equal(res.status, 200);
+        const body = (await res.json()) as MessagesResponse;
+        assert.equal(body.items.length, 1);
+        const item = body.items[0];
+        assert.equal(item?.owner, 'user');
+        assert.equal(item?.text, null);
+        assert.equal(item?.mediaType, 'image');
+        assert.equal(item?.mediaId, INCOMING_MEDIA_ID);
+
+        const stored = await dbOne<{ media_type: string | null; media_id: string | null }>(
+            `select media_type, media_id from wa_messages where wa_chat_phone = $1`,
+            [INCOMING_CHAT],
+        );
+        assert.deepEqual(stored, { media_type: 'image', media_id: INCOMING_MEDIA_ID });
     });
 
     it('messages: keyset-пагинация по id — страницы не пересекаются и не дублируют', async () => {
