@@ -15,6 +15,7 @@ import { mediaGetHandler } from '#Dashboard/Handlers/MediaGet.js';
 import { partiesGetListHandler } from '#Dashboard/Handlers/PartiesGetList.js';
 import { partyGetGuestlistListHandler } from '#Dashboard/Handlers/PartyGetGuestlist.js';
 import { partyPostHandler } from '#Dashboard/Handlers/PartyPost.js';
+import { partyPostDeleteHandler } from '#Dashboard/Handlers/PartyPostDelete.js';
 import { serverError } from '#Dashboard/Lib/Response.js';
 
 const router = IttyRouter();
@@ -29,6 +30,7 @@ router.put('/chats/:phone/pause', withAuthorization, chatSetPauseHandler);
 router.get('/chats/:phone', withAuthorization, chatGetHandler);
 router.get('/parties', withAuthorization, partiesGetListHandler);
 router.post('/party', withAuthorization, partyPostHandler);
+router.post('/party/:id/delete', withAuthorization, partyPostDeleteHandler);
 router.get('/parties/:id/guestlist', withAuthorization, partyGetGuestlistListHandler);
 router.get('/guests/statistic', withAuthorization, guestsGetStatisticHandler);
 router.get('/guests', withAuthorization, guestsGetListHandler);

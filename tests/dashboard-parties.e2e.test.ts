@@ -1,7 +1,7 @@
 // Задача модуля (partiesGetListHandler + partyGetGuestlistListHandler):
 //   вход  → GET /parties?limit&cursor ; GET /parties/:id/guestlist
 //           заголовок authorization: Bearer <access JWT> (гейт withAuthorization)
-//   выход → parties: { id, type, name, price, location, reelsUrl, notes, startsAt, guestCount }[], nextCursor
+//   выход → parties: { id, type, name, price, location, reelsUrl, notes, startsAt, guestCount (гости + friends) }[], nextCursor
 //           сорт: активная (идёт сейчас, ≤ ACTIVE_PARTY_WINDOW_HOURS после старта) →
 //                 будущие (asc) → прошедшие (desc) → без времени (последними)
 //           guestlist: { firstName, lastName, instagram, friends, joinedAt, tableOfferedAt }[] по joined_at asc
@@ -163,7 +163,11 @@ describe('e2e: dashboard partiesGetList + partyGetGuestlistList', () => {
         );
 
         const byId = new Map(mine.map((p) => [p.id, p]));
-        assert.equal(byId.get(ID.get('ongoing') ?? '')?.guestCount, 2, 'guestCount активной = 2');
+        assert.equal(
+            byId.get(ID.get('ongoing') ?? '')?.guestCount,
+            4,
+            'guestCount активной = 2 гостя + 2 друга (friends null → 0)',
+        );
         assert.equal(byId.get(ID.get('future1') ?? '')?.guestCount, 0, 'без гостей → 0');
         assert.equal(
             byId.get(ID.get('notime') ?? '')?.startsAt,
@@ -190,7 +194,7 @@ describe('e2e: dashboard partiesGetList + partyGetGuestlistList', () => {
 
         // Сверка guestCount напрямую с БД.
         const dbRow = await dbOne<{ n: string }>(
-            `select count(*)::text as n from party_guestlist where party_id = $1`,
+            `select sum(1 + coalesce(cardinality(friends), 0))::text as n from party_guestlist where party_id = $1`,
             [ID.get('ongoing') ?? ''],
         );
         assert.equal(

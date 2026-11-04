@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import { env } from '#Dashboard/environment.js';
 
 export const UNIQUE_ERROR_CODE = '23505';
+export const FOREIGN_KEY_ERROR_CODE = '23503';
 
 export const pool = new Pool({
     connectionString: env.DATABASE_URL,

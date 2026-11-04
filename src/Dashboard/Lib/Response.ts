@@ -11,5 +11,8 @@ export const unauthorized = () =>
 export const notFound = () =>
     Response.json({ error: 'not_found' }, { status: 404, headers: NO_STORE_HEADERS });
 
+export const conflict = () =>
+    Response.json({ error: 'conflict' }, { status: 409, headers: NO_STORE_HEADERS });
+
 export const serverError = () =>
     Response.json({ error: 'internal_error' }, { status: 500, headers: NO_STORE_HEADERS });

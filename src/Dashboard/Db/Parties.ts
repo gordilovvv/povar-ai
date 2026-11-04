@@ -50,7 +50,7 @@ export const selectPartiesList = async (
                     party.notes,
                     (select min(time.party_start_at)
                         from party_time time where time.party_id = party.id) as starts_at,
-                    (select count(*)
+                    (select coalesce(sum(1 + coalesce(cardinality(guest.friends), 0)), 0)
                         from party_guestlist guest where guest.party_id = party.id) as guest_count
                 from party
             ),
@@ -186,4 +186,18 @@ export const replacePartyTime = async (client: PoolClient, time: PartyTimeStorag
             time.guestlist_alert_at,
         ),
     );
+};
+
+export const deleteParty = async (client: PoolClient, id: string) => {
+    const result = await client.query(
+        format(
+            `with
+                removed_time as (delete from party_time where party_id = %1$L),
+                removed_tables as (delete from party_tables where party_id = %1$L),
+                removed_sends as (delete from wa_marketing_sends where party_id = %1$L)
+            delete from party where id = %1$L`,
+            id,
+        ),
+    );
+    return result.rowCount;
 };
