@@ -73,7 +73,7 @@ const seed = async () => {
             came_at: joinedAt,
             lang: 'ru',
             instagram_asked_at: joinedAt,
-            marketing_enable: true,
+            marketing: 'enabled',
         });
         await insertGuestlistEntry(client, PAST_PARTY_ID, guestId, joinedAt);
         await updateGuestlistTableAnswer(client, PAST_PARTY_ID, guestId, false, joinedAt);

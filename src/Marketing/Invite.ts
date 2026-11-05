@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg';
 import { ulid } from 'ulid';
-import { updateGuestMarketingEnableOff } from '#Db/Guests.js';
+import { updateGuestMarketingBlockedByUser } from '#Db/Guests.js';
 import {
     marketingMessageSchema,
     type PartyWithTimeStorage,
@@ -38,7 +38,7 @@ export class Invite {
     }
 
     static async unsubscribe(client: PoolClient, phone: string): Promise<string | null> {
-        const revoked = await updateGuestMarketingEnableOff(client, phone);
+        const revoked = await updateGuestMarketingBlockedByUser(client, phone);
         if (!revoked) {
             Logger.log(`[marketing] ${phone} STOP repeated, consent already revoked`);
             return null;

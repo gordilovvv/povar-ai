@@ -67,7 +67,7 @@ const seed = async () => {
             lang: null,
             gender: null,
             instagram_asked_at: null,
-            marketing_enable: true,
+            marketing: 'enabled',
         });
         await upsertWaChat(client, phone, guestId, now);
 

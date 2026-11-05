@@ -77,7 +77,7 @@ const seed = async () => {
             lang: null,
             gender: null,
             instagram_asked_at: null,
-            marketing_enable: true,
+            marketing: 'enabled',
         });
         const guestId = (await client.query('select id from guests where wa_phone = $1', [phone]))
             .rows[0].id;

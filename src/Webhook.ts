@@ -157,7 +157,7 @@ const handleCreateGuest = async (
         lang: null,
         gender: null,
         instagram_asked_at: null,
-        marketing_enable: true,
+        marketing: 'enabled',
     };
     try {
         await insertGuest(client, created);

@@ -4,6 +4,7 @@ import type { Gender } from '#Lib/Gender.js';
 
 type GuestCameFrom = 'ad' | 'manual' | 'party_invite';
 type GuestLang = 'ru' | 'en';
+export type GuestMarketing = 'enabled' | 'disabled' | 'blocked_by_user';
 
 export interface GuestStorage {
     id: string;
@@ -16,7 +17,7 @@ export interface GuestStorage {
     lang: GuestLang | null;
     gender: Gender | null;
     instagram_asked_at: string | null;
-    marketing_enable: boolean;
+    marketing: GuestMarketing;
 }
 
 export const selectGuestByPhone = async (client: PoolClient, waPhone: string) => {
@@ -30,7 +31,7 @@ export const insertGuest = async (client: PoolClient, guest: GuestStorage) => {
     await client.query(
         format(
             `insert into guests
-                (id, wa_phone, first_name, last_name, instagram, came_from, came_at, lang, marketing_enable)
+                (id, wa_phone, first_name, last_name, instagram, came_from, came_at, lang, marketing)
             values
                 (%L, %L, %L, %L, %L, %L, %L, %L, %L)`,
             guest.id,
@@ -41,15 +42,16 @@ export const insertGuest = async (client: PoolClient, guest: GuestStorage) => {
             guest.came_from,
             guest.came_at,
             guest.lang,
-            guest.marketing_enable,
+            guest.marketing,
         ),
     );
 };
 
-export const updateGuestMarketingEnableOff = async (client: PoolClient, waPhone: string) => {
+export const updateGuestMarketingBlockedByUser = async (client: PoolClient, waPhone: string) => {
     const result = await client.query<GuestStorage>(
         format(
-            'update guests set marketing_enable = false where wa_phone = %L and marketing_enable = true returning *',
+            `update guests set marketing = 'blocked_by_user'
+            where wa_phone = %L and marketing <> 'blocked_by_user' returning *`,
             waPhone,
         ),
     );

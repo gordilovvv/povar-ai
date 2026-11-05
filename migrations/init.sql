@@ -36,7 +36,7 @@ create table guests (
     came_at timestamp with time zone,
     lang text,
     gender text, -- male | female | unknown
-    marketing_enable boolean not null default true
+    marketing text -- enabled | disabled | blocked_by_user
 );
 
 create table party_guestlist (

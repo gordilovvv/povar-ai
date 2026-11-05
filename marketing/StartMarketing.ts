@@ -11,7 +11,7 @@ import {
     type GuestStorage,
     insertGuest,
     selectGuestByPhone,
-    updateGuestMarketingEnableOff,
+    updateGuestMarketingBlockedByUser,
 } from '#Db/Guests.js';
 import { marketingMessageSchema, selectActivePartiesWithTimes } from '#Db/Party.js';
 import { pool, UNIQUE_ERROR_CODE } from '#Db/Pool.js';
@@ -169,7 +169,7 @@ const dbBase = await client.query(
         `select guests.wa_phone as phone
         from guests
         where guests.wa_phone is not null
-          and guests.marketing_enable
+          and guests.marketing = 'enabled'
           and not exists (
               select 1 from party_guestlist
               where party_guestlist.party_id = %L and party_guestlist.guest_id = guests.id
@@ -216,7 +216,7 @@ const audience = await client.query(
         `select
             numbers.phone,
             case
-                when guests.marketing_enable = false then 'no marketing consent'
+                when guests.marketing <> 'enabled' then 'no marketing consent'
                 when party_guestlist.guest_id is not null then 'in guestlist'
                 when wa_chats.paused_at is not null then 'paused'
                 when wa_chats.last_received_message_at > now() - make_interval(hours => %L::int)
@@ -469,7 +469,7 @@ async function sendTemplate(to: string): Promise<string | null> {
             console.error,
         );
         if (errorCode === MARKETING_OPT_OUT_ERROR_CODE) {
-            await updateGuestMarketingEnableOff(client, to);
+            await updateGuestMarketingBlockedByUser(client, to);
             progress.event(
                 `${YELLOW}${to} отписался от рассылок (код ${MARKETING_OPT_OUT_ERROR_CODE}) — согласие снято в базе${RESET}`,
             );
@@ -519,7 +519,7 @@ async function selectOrCreateGuest(waPhone: string): Promise<GuestStorage> {
             came_at: toDateTime(new Date()),
             lang: null,
             instagram_asked_at: null,
-            marketing_enable: true,
+            marketing: 'enabled',
         });
     } catch (error) {
         if ((error as { code?: string }).code !== UNIQUE_ERROR_CODE) {
