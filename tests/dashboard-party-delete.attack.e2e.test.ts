@@ -207,7 +207,9 @@ describe('attack: dashboard partyPostDelete', () => {
         assert.deepEqual(await countRows(AUTH_ID), FULL, 'соседняя вечеринка цела');
     });
 
-    it('race: гость коммитится, пока delete ждёт замок на party (старый снапшот) → 409, всё цело', { timeout: 20_000 }, async () => {
+    it('race: гость коммитится, пока delete ждёт замок на party (старый снапшот) → 409, всё цело', {
+        timeout: 20_000,
+    }, async () => {
         await withClient((c) => seedParty(c, GL_ID));
         let res: Response | null = null;
         await withClient(async (locker) => {
@@ -235,7 +237,9 @@ describe('attack: dashboard partyPostDelete', () => {
         );
     });
 
-    it('race: незакоммиченная вставка гостя держит party, delete ждёт → коммит → 409; откат → 200', { timeout: 20_000 }, async () => {
+    it('race: незакоммиченная вставка гостя держит party, delete ждёт → коммит → 409; откат → 200', {
+        timeout: 20_000,
+    }, async () => {
         for (const outcome of ['commit', 'rollback'] as const) {
             if ((await countRows(GL_ID)).party === 0) {
                 await withClient((c) => seedParty(c, GL_ID));

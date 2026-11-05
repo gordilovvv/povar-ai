@@ -1,10 +1,12 @@
 import type { PoolClient } from 'pg';
 import format from 'pg-format';
+import { z } from 'zod';
 import type { Gender } from '#Lib/Gender.js';
 
 type GuestCameFrom = 'ad' | 'manual' | 'party_invite';
 type GuestLang = 'ru' | 'en';
-export type GuestMarketing = 'enabled' | 'disabled' | 'blocked_by_user';
+export const guestMarketingSchema = z.enum(['enabled', 'disabled', 'blocked_by_user']);
+export type GuestMarketing = z.infer<typeof guestMarketingSchema>;
 
 export interface GuestStorage {
     id: string;

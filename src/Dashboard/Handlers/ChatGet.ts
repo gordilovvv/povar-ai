@@ -25,7 +25,9 @@ export const chatGetHandler: RequestHandler<IRequest> = async (request) => {
 
     return success({
         phone: row.wa_phone,
+        guestId: row.guest_id,
         userName: name.length ? name : null,
+        marketing: row.marketing,
         lastMessageAt: fromDateTime(row.last_message_at),
         lastUserMessageAt: fromDateTime(row.last_user_message_at),
         lastBotMessageAt: fromDateTime(row.last_bot_message_at),

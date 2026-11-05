@@ -1,5 +1,7 @@
 import type { PoolClient } from 'pg';
 import format from 'pg-format';
+import type { GuestMarketing } from '#Db/Guests.js';
+import { waWorkerStatusSchema } from '#Db/WaMessages.js';
 import { toDateTime } from '#Lib/Fmt.js';
 
 export interface ChatListRow {
@@ -19,8 +21,10 @@ export interface ChatsCursor {
 
 export interface ChatRow {
     wa_phone: string;
+    guest_id: string | null;
     first_name: string | null;
     last_name: string | null;
+    marketing: GuestMarketing | null;
     last_message_at: string | null;
     last_user_message_at: string | null;
     last_bot_message_at: string | null;
@@ -43,8 +47,10 @@ export const selectChat = async (client: PoolClient, phone: string) => {
         format(
             `select
                 chat.wa_phone,
+                guest.id as guest_id,
                 guest.first_name,
                 guest.last_name,
+                guest.marketing,
                 greatest(chat.last_sent_message_at, chat.last_received_message_at) as last_message_at,
                 chat.last_received_message_at as last_user_message_at,
                 chat.last_sent_message_at as last_bot_message_at,
@@ -202,4 +208,27 @@ export const selectChatsList = async (
         ),
     );
     return result.rows;
+};
+
+export const deleteChat = async (client: PoolClient, phone: string) => {
+    const result = await client.query(
+        format(
+            `with
+                removed_messages as (
+                    delete from wa_messages
+                    where wa_chat_phone = %1$L
+                      and (worker_status is null or worker_status not in (%2$L, %3$L))
+                ),
+                disabled_guest as (
+                    update guests set marketing = 'disabled'
+                    where wa_phone = %1$L and marketing = 'enabled'
+                      and exists (select 1 from wa_chats where wa_phone = %1$L)
+                )
+            delete from wa_chats where wa_phone = %1$L`,
+            phone,
+            waWorkerStatusSchema.enum.need_processed,
+            waWorkerStatusSchema.enum.processing,
+        ),
+    );
+    return result.rowCount ?? 0;
 };

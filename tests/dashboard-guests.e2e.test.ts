@@ -1,7 +1,8 @@
 // Задача модуля (guestsGetStatisticHandler + guestsGetListHandler):
-//   вход  → GET /guests/statistic ; GET /guests?limit&lastId  (Bearer JWT, гейт withAuthorization)
+//   вход  → GET /guests/statistic ; GET /guests?limit&lastId&marketing  (Bearer JWT, гейт withAuthorization)
 //   выход → statistic: { guestsCount, maleCount, femaleCount } = факт count(*) по guests
-//           list: { id, phone, firstName, lastName, instagram, gender }[] — keyset id > lastId, order by id asc
+//           list: { id, phone, firstName, lastName, instagram, gender, marketing }[] — keyset id > lastId, order by id asc
+//           marketing — опц. фильтр enabled|disabled|blocked_by_user, без него/невалидный — все
 //           limit 1..100, default 30, клампится
 //   бюджет → сеть/БД не меряем, только measure()
 //   негатив → нет/битый токен → 401 (в .attack)
@@ -29,9 +30,26 @@ const GUESTS = [
         last: 'Male',
         insta: 'https://insta/0',
         gender: 'male',
+        marketing: 'enabled',
     },
-    { id: ulid(), phone: 'E2E_gs_1', first: 'Bea', last: 'Female', insta: null, gender: 'female' },
-    { id: ulid(), phone: 'E2E_gs_2', first: null, last: null, insta: null, gender: null },
+    {
+        id: ulid(),
+        phone: 'E2E_gs_1',
+        first: 'Bea',
+        last: 'Female',
+        insta: null,
+        gender: 'female',
+        marketing: 'disabled',
+    },
+    {
+        id: ulid(),
+        phone: 'E2E_gs_2',
+        first: null,
+        last: null,
+        insta: null,
+        gender: null,
+        marketing: 'blocked_by_user',
+    },
 ].sort((a, b) => (a.id < b.id ? -1 : 1));
 const GUEST_PHONES = GUESTS.map((g) => g.phone);
 
@@ -42,6 +60,7 @@ type GuestsList = {
     lastName: string | null;
     instagram: string | null;
     gender: 'male' | 'female' | null;
+    marketing: 'enabled' | 'disabled' | 'blocked_by_user' | null;
 }[];
 
 interface Statistic {
@@ -99,9 +118,9 @@ describe('e2e: dashboard guests', () => {
         await withClient(async (client) => {
             for (const g of GUESTS) {
                 await client.query(
-                    `insert into guests (id, wa_phone, first_name, last_name, instagram, gender)
-                     values ($1, $2, $3, $4, $5, $6)`,
-                    [g.id, g.phone, g.first, g.last, g.insta, g.gender],
+                    `insert into guests (id, wa_phone, first_name, last_name, instagram, gender, marketing)
+                     values ($1, $2, $3, $4, $5, $6, $7)`,
+                    [g.id, g.phone, g.first, g.last, g.insta, g.gender, g.marketing],
                 );
             }
         });
@@ -131,6 +150,7 @@ describe('e2e: dashboard guests', () => {
                 lastName: g.last,
                 instagram: g.insta,
                 gender: g.gender,
+                marketing: g.marketing,
             })),
             'ровно 2 гостя строго после lastId, по id asc',
         );
@@ -157,5 +177,37 @@ describe('e2e: dashboard guests', () => {
         assert.equal((await get<GuestsList>('/guests?limit=1000')).length, Math.min(100, total));
         assert.equal((await get<GuestsList>('/guests?limit=0')).length, Math.min(1, total));
         assert.equal((await get<GuestsList>('/guests?limit=abc')).length, Math.min(30, total));
+    });
+
+    it('e2e: guests list — фильтр marketing отдаёт только нужный статус, невалидный → все', async () => {
+        for (const status of ['enabled', 'disabled', 'blocked_by_user'] as const) {
+            const page = await get<GuestsList>(`/guests?marketing=${status}&limit=100`);
+            assert.ok(page.length > 0, `${status}: сид гарантирует минимум одного`);
+            assert.ok(
+                page.every((g) => g.marketing === status),
+                `${status}: все строки с этим статусом`,
+            );
+            const dbCount = await dbOne<{ n: string }>(
+                `select count(*) n from (select 1 from guests where marketing = $1 order by id asc limit 100) t`,
+                [status],
+            );
+            assert.equal(page.length, Number(dbCount?.n), `${status}: размер страницы = факт БД`);
+        }
+
+        const seeded = new Set(GUESTS.map((g) => g.id));
+        const [first] = GUESTS;
+        const afterFirst = await get<GuestsList>(`/guests?marketing=disabled&lastId=${first.id}`);
+        assert.deepEqual(
+            afterFirst.filter((g) => seeded.has(g.id)).map((g) => g.id),
+            GUESTS.filter((g) => g.marketing === 'disabled' && g.id > first.id).map((g) => g.id),
+            'фильтр и keyset работают вместе',
+        );
+
+        const total = (await dbStatistic()).guestsCount;
+        assert.equal(
+            (await get<GuestsList>('/guests?marketing=whatever')).length,
+            Math.min(30, total),
+            'невалидный фильтр → без фильтра',
+        );
     });
 });

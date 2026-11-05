@@ -2,6 +2,7 @@ import type { IRequest, RequestHandler } from 'itty-router';
 import { type GuestGender, type GuestListRow, selectGuestsList } from '#Dashboard/Db/Guests.js';
 import { pool } from '#Dashboard/Db/Pool.js';
 import { success } from '#Dashboard/Lib/Response.js';
+import { type GuestMarketing, guestMarketingSchema } from '#Db/Guests.js';
 import { minMax, safeParseInt, safeParseString } from '#Lib/Fmt.js';
 
 interface GuestListItem {
@@ -11,16 +12,19 @@ interface GuestListItem {
     lastName: string | null;
     instagram: string | null;
     gender: GuestGender | null;
+    marketing: GuestMarketing | null;
 }
 
 export const guestsGetListHandler: RequestHandler<IRequest> = async (request) => {
     const limit = minMax(safeParseInt(request.query.limit, 30), 1, 100);
     const lastId = safeParseString(request.query.lastId);
+    const marketingQuery = guestMarketingSchema.safeParse(request.query.marketing);
+    const marketing = marketingQuery.success ? marketingQuery.data : null;
 
     const client = await pool.connect();
     let rows: GuestListRow[];
     try {
-        rows = await selectGuestsList(client, lastId, limit);
+        rows = await selectGuestsList(client, lastId, limit, marketing);
     } finally {
         client.release();
     }
@@ -34,6 +38,7 @@ export const guestsGetListHandler: RequestHandler<IRequest> = async (request) =>
             lastName: row.last_name,
             instagram: row.instagram,
             gender: row.gender,
+            marketing: row.marketing,
         });
     }
 

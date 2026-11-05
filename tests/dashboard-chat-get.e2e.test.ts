@@ -1,7 +1,7 @@
 // Задача модуля (chatGetHandler + chatGetMessagesHandler):
 //   вход  → GET /chats/:phone ; GET /chats/:phone/messages?limit&cursor
 //           заголовок authorization: Bearer <access JWT> (гейт withAuthorization)
-//   выход → chat: { phone, userName, lastMessageAt, lastUserMessageAt, lastBotMessageAt, pausedAt, pauseDetails }
+//   выход → chat: { phone, guestId, userName, marketing, lastMessageAt, lastUserMessageAt, lastBotMessageAt, pausedAt, pauseDetails }
 //           messages: { id, text, owner: 'user'|'bot'|'marketing', status, sentAt, mediaType, mediaId }[], nextCursor
 //           messages по id desc (ULID), keyset по id; owner: guest→user, sema→bot, marketing→marketing
 //           mediaType/mediaId отдаются как лежат в wa_messages (входящие медиа гостя тоже)
@@ -29,6 +29,7 @@ import {
 
 const DASH_PHONE = 'E2E_chatget_user';
 const CHAT_PHONE = 'E2E_cg_0001';
+const GUEST_ID = ulid();
 const EMPTY_CHAT = 'E2E_cg_empty';
 const INCOMING_CHAT = 'E2E_cg_incoming';
 const INCOMING_MEDIA_ID = 'E2E_cg_media_0002';
@@ -76,9 +77,9 @@ async function cleanup(): Promise<void> {
 
 async function seed(): Promise<void> {
     await withClient(async (client) => {
-        const guestId = ulid();
+        const guestId = GUEST_ID;
         await client.query(
-            `insert into guests (id, wa_phone, first_name, last_name) values ($1, $2, 'Anna', 'Ivanova')`,
+            `insert into guests (id, wa_phone, first_name, last_name, marketing) values ($1, $2, 'Anna', 'Ivanova', 'disabled')`,
             [guestId, CHAT_PHONE],
         );
         await client.query(
@@ -143,7 +144,9 @@ async function seed(): Promise<void> {
 
 interface ChatResponse {
     phone: string;
+    guestId: string | null;
     userName: string | null;
+    marketing: 'enabled' | 'disabled' | 'blocked_by_user' | null;
     lastMessageAt: string | null;
     lastUserMessageAt: string | null;
     lastBotMessageAt: string | null;
@@ -206,6 +209,8 @@ describe('e2e: dashboard chatGet + chatGetMessages', () => {
 
         assert.equal(chat.phone, CHAT_PHONE);
         assert.equal(chat.userName, 'Anna Ivanova', 'имя склеено из guests');
+        assert.equal(chat.guestId, GUEST_ID, 'guestId = guests.id');
+        assert.equal(chat.marketing, 'disabled', 'marketing = guests.marketing');
         assert.equal(chat.lastUserMessageAt, LAST_RECEIVED, 'lastUserMessageAt = last_received');
         assert.equal(chat.lastBotMessageAt, LAST_SENT, 'lastBotMessageAt = last_sent');
         assert.equal(chat.lastMessageAt, LAST_SENT, 'lastMessageAt = greatest(sent, received)');
@@ -230,6 +235,8 @@ describe('e2e: dashboard chatGet + chatGetMessages', () => {
         assert.equal(res.status, 200);
         const chat = (await res.json()) as ChatResponse;
         assert.equal(chat.userName, null);
+        assert.equal(chat.guestId, null);
+        assert.equal(chat.marketing, null);
         assert.equal(chat.lastMessageAt, null);
         assert.equal(chat.lastUserMessageAt, null);
         assert.equal(chat.lastBotMessageAt, null);
