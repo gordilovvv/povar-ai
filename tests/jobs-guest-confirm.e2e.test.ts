@@ -18,11 +18,18 @@ const PARTY_START = '2032-06-15T18:00:00Z';
 const NOW_DUE = '2032-06-15T15:30:00Z'; // 19:30 Дубай: после порога, до старта
 const NOW_BEFORE_DUE = '2032-06-15T14:59:59Z';
 const NOW_AFTER_START = '2032-06-15T19:00:00Z';
+// 00:00 Дубай дня вечеринки = 2032-06-14T20:00Z; записавшиеся с этого момента опрос не получают.
+const JOINED_EVE_2359 = '2032-06-14T19:59:00Z';
+const JOINED_DAY_0000 = '2032-06-14T20:00:00Z';
+const JOINED_DAY_1859 = '2032-06-15T14:59:00Z';
 
 const PARTY_ID = 'E2E_GUEST_CONFIRM_PARTY';
 const G_EARLY = 'E2E_GUEST_CONFIRM_G1';
 const G_LATE = 'E2E_GUEST_CONFIRM_G2';
 const G_NO_PHONE = 'E2E_GUEST_CONFIRM_G3';
+const G_EVE = 'E2E_GUEST_CONFIRM_G4';
+const G_MIDNIGHT = 'E2E_GUEST_CONFIRM_G5';
+const G_SAME_DAY = 'E2E_GUEST_CONFIRM_G6';
 
 interface FetchCall {
     url: string;
@@ -58,7 +65,9 @@ const cleanup = async () => {
     await dbQuery(`delete from party_guestlist where party_id = $1`, [PARTY_ID]);
     await dbQuery(`delete from party_time where party_id = $1`, [PARTY_ID]);
     await dbQuery(`delete from party where id = $1`, [PARTY_ID]);
-    await dbQuery(`delete from guests where id = any($1)`, [[G_EARLY, G_LATE, G_NO_PHONE]]);
+    await dbQuery(`delete from guests where id = any($1)`, [
+        [G_EARLY, G_LATE, G_NO_PHONE, G_EVE, G_MIDNIGHT, G_SAME_DAY],
+    ]);
 };
 
 const seed = async () => {
@@ -90,6 +99,23 @@ const seed = async () => {
         [PARTY_ID, G_EARLY, '2032-06-10T10:00:00Z', G_LATE, '2032-06-15T15:10:00Z', G_NO_PHONE],
     );
 };
+
+const addGuest = async (id: string, first: string, joinedAt: string) => {
+    const phone = `wa_${id}`;
+    await dbQuery(`insert into guests (id, wa_phone, first_name) values ($1,$2,$3)`, [
+        id,
+        phone,
+        first,
+    ]);
+    await dbQuery(`insert into wa_chats (wa_phone, guest_id) values ($1,$2)`, [phone, id]);
+    await dbQuery(`insert into party_guestlist (party_id, guest_id, joined_at) values ($1,$2,$3)`, [
+        PARTY_ID,
+        id,
+        joinedAt,
+    ]);
+};
+
+const sentTo = (id: string) => sent.filter((call) => call.body.to === `wa_${id}`).length;
 
 const answerOf = async (guestId: string) => {
     const rows = await dbQuery<{ guest_confirm_answer: string | null }>(
@@ -185,6 +211,52 @@ describe('e2e: jobs-guest-confirm', () => {
         await runTick(pool, { ...CONFIG, waSend: 'off' }, NOW_DUE);
         assert.equal(sent.length, 0);
         assert.equal(await answerOf(G_EARLY), 'pending');
+    });
+
+    test('записался в 23:59 Дубай накануне — опрос уходит', async () => {
+        await seed();
+        await addGuest(G_EVE, 'Eva', JOINED_EVE_2359);
+        sent = [];
+        waOk = true;
+        await runTick(pool, CONFIG, NOW_DUE);
+        assert.equal(sentTo(G_EVE), 1);
+        assert.equal(await answerOf(G_EVE), 'pending');
+    });
+
+    test('записался ровно в 00:00 Дубай дня вечеринки — опрос не уходит', async () => {
+        await seed();
+        await addGuest(G_MIDNIGHT, 'Mark', JOINED_DAY_0000);
+        sent = [];
+        waOk = true;
+        await runTick(pool, CONFIG, NOW_DUE);
+        assert.equal(sentTo(G_MIDNIGHT), 0);
+        assert.equal(await answerOf(G_MIDNIGHT), null);
+    });
+
+    test('записался в день вечеринки до 19:00 Дубай — опрос не уходит', async () => {
+        await seed();
+        await addGuest(G_SAME_DAY, 'Sara', JOINED_DAY_1859);
+        sent = [];
+        waOk = true;
+        await runTick(pool, CONFIG, NOW_DUE);
+        assert.equal(sentTo(G_SAME_DAY), 0);
+        assert.equal(await answerOf(G_SAME_DAY), null);
+    });
+
+    test('смесь: опрос уходит только записавшимся до дня вечеринки', async () => {
+        await seed();
+        await addGuest(G_EVE, 'Eva', JOINED_EVE_2359);
+        await addGuest(G_MIDNIGHT, 'Mark', JOINED_DAY_0000);
+        await addGuest(G_SAME_DAY, 'Sara', JOINED_DAY_1859);
+        sent = [];
+        waOk = true;
+        await runTick(pool, CONFIG, NOW_DUE);
+        assert.deepEqual(sent.map((call) => call.body.to).sort(), [`wa_${G_EARLY}`, `wa_${G_EVE}`]);
+        assert.equal(await answerOf(G_EARLY), 'pending');
+        assert.equal(await answerOf(G_EVE), 'pending');
+        assert.equal(await answerOf(G_MIDNIGHT), null);
+        assert.equal(await answerOf(G_SAME_DAY), null);
+        assert.equal(await answerOf(G_LATE), null);
     });
 
     test('тап Yes/No: ставит ответ, пишет историю, отвечает текстом; агент не вызывается', async () => {

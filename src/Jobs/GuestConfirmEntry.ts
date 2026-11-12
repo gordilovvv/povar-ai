@@ -16,7 +16,7 @@ export interface GuestConfirmJobConfig {
 interface DuePartyRow {
     party_id: string;
     party_date: string;
-    due_at: Date;
+    day_start_at: Date;
 }
 
 interface ClaimedGuestRow {
@@ -37,7 +37,7 @@ export const runTick = async (
 ) => {
     const parties = await selectDueParties(pool, now);
     for (const party of parties) {
-        const claimed = await claimGuests(pool, party.party_id, party.due_at);
+        const claimed = await claimGuests(pool, party.party_id, party.day_start_at);
         for (const guest of claimed) {
             const text = `Hi ${guest.first_name}, are you coming to the event tonight, ${party.party_date}? Let us know so we can get the venue ready for everyone.`;
             if (config.waSend !== 'on') {
@@ -75,24 +75,24 @@ const selectDueParties = async (pool: pg.Pool, now: string | null) => {
             select
                 p.id as party_id,
                 to_char(t.start_at at time zone 'Asia/Dubai', 'FMMonth FMDD') as party_date,
-                t.due_at
+                t.day_start_at
             from party p
             join lateral (
                 select
                     min(pt.party_start_at) as start_at,
-                    (date_trunc('day', min(pt.party_start_at) at time zone 'Asia/Dubai') + interval '19 hours')
-                        at time zone 'Asia/Dubai' as due_at
+                    date_trunc('day', min(pt.party_start_at) at time zone 'Asia/Dubai')
+                        at time zone 'Asia/Dubai' as day_start_at
                 from party_time pt
                 where pt.party_id = p.id and pt.party_start_at > (select now_at from tick)
             ) t on true
             where t.start_at is not null
-                and (select now_at from tick) >= t.due_at
+                and (select now_at from tick) >= t.day_start_at + interval '19 hours'
                 and exists(
                     select 1 from party_guestlist gl
                     join guests g on g.id = gl.guest_id
                     where gl.party_id = p.id
                         and gl.guest_confirm_answer is null
-                        and gl.joined_at < t.due_at
+                        and gl.joined_at < t.day_start_at
                         and g.wa_phone is not null
                         and g.first_name is not null
                 )
@@ -105,7 +105,7 @@ const selectDueParties = async (pool: pg.Pool, now: string | null) => {
 
 // Захват работы: помечаем строки ДО отправки — сам себе замок. Параллельный тик на ту же
 // вечеринку получит 0 строк (их guest_confirm_answer уже не null) и не задвоит рассылку.
-const claimGuests = async (pool: pg.Pool, partyId: string, dueAt: Date) => {
+const claimGuests = async (pool: pg.Pool, partyId: string, dayStartAt: Date) => {
     const result = await pool.query<ClaimedGuestRow>(
         format(
             `update party_guestlist gl set guest_confirm_answer = 'pending'
@@ -118,7 +118,7 @@ const claimGuests = async (pool: pg.Pool, partyId: string, dueAt: Date) => {
                 and g.first_name is not null
             returning gl.guest_id, g.wa_phone, g.first_name`,
             partyId,
-            dueAt.toISOString(),
+            dayStartAt.toISOString(),
         ),
     );
     return result.rows;
