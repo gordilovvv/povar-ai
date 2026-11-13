@@ -154,6 +154,35 @@ describe('e2e: jobs-guestlist', () => {
         assert.notEqual(await alertedAtOf(G4), null, 'G4 помечен');
     });
 
+    test('отказался на опросе: в список не попадает; молчун и согласившийся — попадают', async () => {
+        await seed();
+        sent = [];
+        telegramOk = true;
+        await addGuestlistEntry(G1, null, '2030-06-10T10:00:00Z', null);
+        await addGuestlistEntry(G2, ['Greg Lee'], '2030-06-10T11:00:00Z', null);
+        await addGuestlistEntry(G3, null, '2030-06-10T12:00:00Z', null);
+        await addGuestlistEntry(G4, null, '2030-06-10T13:00:00Z', null);
+        await dbQuery(
+            `update party_guestlist set guest_confirm_answer = v.answer
+            from (values ($2, 'yes'), ($3, 'no'), ($4, 'pending')) as v (guest_id, answer)
+            where party_id = $1 and party_guestlist.guest_id = v.guest_id`,
+            [PARTY_ID, G1, G2, G3],
+        );
+        await runTick(pool, CONFIG, NOW_DUE);
+        assert.equal(sent.length, 1);
+        const text = sent[0]?.body.text ?? '';
+        for (const name of ['Anna Ivanova', 'Clara Sidorova', 'Dmitry Orlov']) {
+            assert.ok(text.includes(name), `${name} в списке`);
+        }
+        assert.ok(!text.includes('Boris Petrov'), 'отказавшийся не в списке');
+        assert.ok(!text.includes('Greg Lee'), 'друзья отказавшегося не в списке');
+        assert.equal(await alertedAtOf(G2), null);
+
+        sent = [];
+        await runTick(pool, CONFIG, NOW_DUE);
+        assert.equal(sent.length, 0, 'отказник не держит вечеринку в работе');
+    });
+
     test('до guestlist_alert_at не шлём', async () => {
         await seed();
         sent = [];

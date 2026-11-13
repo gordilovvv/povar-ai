@@ -21,7 +21,8 @@ create table party_time (
     party_start_at timestamp with time zone,
     party_end_at timestamp with time zone,
     free_entry_before timestamp with time zone,
-    guestlist_alert_at timestamp with time zone
+    guestlist_alert_at timestamp with time zone,
+    guest_confirm_at timestamp with time zone
 );
 
 -- Guests (users)

@@ -66,8 +66,7 @@ export const runTick = async (
     }
 };
 
-// Порог = 19:00 по Дубаю календарного дня самой вечеринки; вечеринка ещё не началась.
-// TODO: время переклички настраивать на каждую вечеринку отдельно
+// guest_confirm_at null = опрос для вечеринки выключен. Вечеринка ещё не началась.
 const selectDueParties = async (pool: pg.Pool, now: string | null) => {
     const result = await pool.query<DuePartyRow>(
         format(
@@ -79,14 +78,16 @@ const selectDueParties = async (pool: pg.Pool, now: string | null) => {
             from party p
             join lateral (
                 select
-                    min(pt.party_start_at) as start_at,
-                    date_trunc('day', min(pt.party_start_at) at time zone 'Asia/Dubai')
+                    pt.party_start_at as start_at,
+                    pt.guest_confirm_at as confirm_at,
+                    date_trunc('day', pt.party_start_at at time zone 'Asia/Dubai')
                         at time zone 'Asia/Dubai' as day_start_at
                 from party_time pt
                 where pt.party_id = p.id and pt.party_start_at > (select now_at from tick)
+                order by pt.party_start_at
+                limit 1
             ) t on true
-            where t.start_at is not null
-                and (select now_at from tick) >= t.day_start_at + interval '19 hours'
+            where (select now_at from tick) >= t.confirm_at
                 and exists(
                     select 1 from party_guestlist gl
                     join guests g on g.id = gl.guest_id

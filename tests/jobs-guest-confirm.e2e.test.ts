@@ -15,6 +15,7 @@ const CONFIG = {
 
 // Дубай = UTC+4. Старт 22:00 Дубай = 18:00Z; порог 19:00 Дубай того же дня = 15:00Z.
 const PARTY_START = '2032-06-15T18:00:00Z';
+const CONFIRM_AT = '2032-06-15T15:00:00Z';
 const NOW_DUE = '2032-06-15T15:30:00Z'; // 19:30 Дубай: после порога, до старта
 const NOW_BEFORE_DUE = '2032-06-15T14:59:59Z';
 const NOW_AFTER_START = '2032-06-15T19:00:00Z';
@@ -77,8 +78,8 @@ const seed = async () => {
         [PARTY_ID],
     );
     await dbQuery(
-        `insert into party_time (party_id, party_start_at, guestlist_alert_at) values ($1,$2,$2)`,
-        [PARTY_ID, PARTY_START],
+        `insert into party_time (party_id, party_start_at, guestlist_alert_at, guest_confirm_at) values ($1,$2,$2,$3)`,
+        [PARTY_ID, PARTY_START, CONFIRM_AT],
     );
     for (const [id, phone, first] of [
         [G_EARLY, `wa_${G_EARLY}`, 'Anna'],
@@ -188,6 +189,17 @@ describe('e2e: jobs-guest-confirm', () => {
         sent = [];
         await runTick(pool, CONFIG, NOW_BEFORE_DUE);
         await runTick(pool, CONFIG, NOW_AFTER_START);
+        assert.equal(sent.length, 0);
+        assert.equal(await answerOf(G_EARLY), null);
+    });
+
+    test('guest_confirm_at null: опрос выключен, никому не шлём', async () => {
+        await seed();
+        await dbQuery(`update party_time set guest_confirm_at = null where party_id = $1`, [
+            PARTY_ID,
+        ]);
+        sent = [];
+        await runTick(pool, CONFIG, NOW_DUE);
         assert.equal(sent.length, 0);
         assert.equal(await answerOf(G_EARLY), null);
     });

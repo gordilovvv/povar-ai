@@ -54,6 +54,7 @@ const selectDueParties = async (pool: pg.Pool, now: string | null) => {
                 and exists(
                     select 1 from party_guestlist n
                     where n.party_id = p.id and n.telegram_alert_at is null
+                        and n.guest_confirm_answer is distinct from 'no'
                 )
             order by p.id`,
             now,
@@ -71,6 +72,7 @@ const claimGuests = async (pool: pg.Pool, partyId: string) => {
             from guests g
             where gl.party_id = %L and gl.guest_id = g.id and gl.telegram_alert_at is null
                 and g.first_name is not null
+                and gl.guest_confirm_answer is distinct from 'no'
             returning gl.guest_id, gl.joined_at, g.first_name, g.last_name, gl.friends`,
             partyId,
         ),
