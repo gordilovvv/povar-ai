@@ -2,7 +2,7 @@
 //   вход  → GET /parties?limit&cursor ; GET /parties/:id ; GET /parties/:id/guestlist
 //           заголовок authorization: Bearer <access JWT> (гейт withAuthorization)
 //   выход → parties: { id, type, name, price, location, googleMapLink, reelsUrl, notes, startsAt,
-//                      guestCount (гости + friends), time: { startsAt, endsAt, freeEntryBefore, guestlistAlertAt } | null }[], nextCursor
+//                      guestCount (гости + friends), time: { startsAt, endsAt, freeEntryBefore, guestlistAlertAt, guestConfirmAt } | null }[], nextCursor
 //           сорт: активная (идёт сейчас, ≤ ACTIVE_PARTY_WINDOW_HOURS после старта) →
 //                 будущие (asc) → прошедшие (desc) → без времени (последними)
 //           party: те же поля без startsAt; нет вечеринки → 404
@@ -20,6 +20,7 @@ import { toDateTime } from '#Lib/Fmt.js';
 import {
     closePool,
     dbOne,
+    dbQuery,
     measure,
     seedDashboardUser,
     signAuthToken,
@@ -49,13 +50,29 @@ const GUEST_PHONES = ['E2E_ptg_0', 'E2E_ptg_1'];
 const GUEST_IDS = [ulid(), ulid()];
 const END_OFFSET = 6 * HOUR_MS;
 const ALERT_OFFSET = -3 * HOUR_MS;
+const CONFIRM_OFFSET = -5 * HOUR_MS;
+
+// Вне OWN_IDS: не влияет на ассерты сорта и пагинации.
+const CONFIRM_PARTY_ID = `E2E_pt_confirm_${ulid()}`;
+const CONFIRM_GUESTS = [
+    { answer: 'no', friends: ['No F1', 'No F2', 'No F3'] },
+    { answer: 'pending', friends: ['Pending F1'] },
+    { answer: 'yes', friends: null },
+    { answer: 'failed', friends: ['Failed F1', 'Failed F2'] },
+    { answer: null, friends: null },
+].map((g, i) => ({ ...g, id: ulid(), phone: `E2E_ptg_c${i}` }));
+const CONFIRM_KEPT = CONFIRM_GUESTS.filter((g) => g.answer !== 'no');
+const CONFIRM_EXPECTED_COUNT = 7;
 
 async function cleanup(): Promise<void> {
     await withClient(async (client) => {
-        await client.query(`delete from party_guestlist where party_id = any($1)`, [OWN_IDS]);
-        await client.query(`delete from party_time where party_id = any($1)`, [OWN_IDS]);
-        await client.query(`delete from party where id = any($1)`, [OWN_IDS]);
-        await client.query(`delete from guests where wa_phone = any($1)`, [GUEST_PHONES]);
+        const partyIds = [...OWN_IDS, CONFIRM_PARTY_ID];
+        await client.query(`delete from party_guestlist where party_id = any($1)`, [partyIds]);
+        await client.query(`delete from party_time where party_id = any($1)`, [partyIds]);
+        await client.query(`delete from party where id = any($1)`, [partyIds]);
+        await client.query(`delete from guests where wa_phone = any($1)`, [
+            [...GUEST_PHONES, ...CONFIRM_GUESTS.map((g) => g.phone)],
+        ]);
         await client.query(`delete from dashboard_users where phone_number = $1`, [DASH_PHONE]);
     });
 }
@@ -79,13 +96,17 @@ async function seed(): Promise<void> {
             );
             if (party.offset !== null) {
                 await client.query(
-                    `insert into party_time (party_id, party_start_at, party_end_at, guestlist_alert_at)
-                     values ($1, $2, $3, $4)`,
+                    `insert into party_time
+                        (party_id, party_start_at, party_end_at, guestlist_alert_at, guest_confirm_at)
+                     values ($1, $2, $3, $4, $5)`,
                     [
                         id,
                         toDateTime(new Date(NOW + party.offset)),
                         toDateTime(new Date(NOW + party.offset + END_OFFSET)),
                         toDateTime(new Date(NOW + party.offset + ALERT_OFFSET)),
+                        party.key === 'ongoing'
+                            ? toDateTime(new Date(NOW + party.offset + CONFIRM_OFFSET))
+                            : null,
                     ],
                 );
             }
@@ -109,6 +130,38 @@ async function seed(): Promise<void> {
                 [ongoingId, guestId, toDateTime(new Date(NOW + i * 1000)), FRIENDS[i], OFFERED[i]],
             );
         }
+
+        await client.query(
+            `insert into party (id, type, name, location) values ($1, 'owned', 'Party confirm', 'Loc confirm')`,
+            [CONFIRM_PARTY_ID],
+        );
+        await client.query(
+            `insert into party_time (party_id, party_start_at, party_end_at, guestlist_alert_at)
+             values ($1, $2, $3, $4)`,
+            [
+                CONFIRM_PARTY_ID,
+                toDateTime(new Date(NOW + 3 * DAY_MS)),
+                toDateTime(new Date(NOW + 3 * DAY_MS + END_OFFSET)),
+                toDateTime(new Date(NOW + 3 * DAY_MS + ALERT_OFFSET)),
+            ],
+        );
+        for (const [i, guest] of CONFIRM_GUESTS.entries()) {
+            await client.query(
+                `insert into guests (id, wa_phone, first_name) values ($1, $2, $3)`,
+                [guest.id, guest.phone, `Confirm${i}`],
+            );
+            await client.query(
+                `insert into party_guestlist (party_id, guest_id, joined_at, friends, guest_confirm_answer)
+                 values ($1, $2, $3, $4, $5)`,
+                [
+                    CONFIRM_PARTY_ID,
+                    guest.id,
+                    toDateTime(new Date(NOW + i * 1000)),
+                    guest.friends,
+                    guest.answer,
+                ],
+            );
+        }
     });
 }
 
@@ -117,6 +170,7 @@ interface PartyTime {
     endsAt: string | null;
     freeEntryBefore: string | null;
     guestlistAlertAt: string | null;
+    guestConfirmAt: string | null;
 }
 
 interface PartyItem {
@@ -153,9 +207,20 @@ const ONGOING_TIME: PartyTime = {
     endsAt: isoSec(NOW - 2 * HOUR_MS + END_OFFSET),
     freeEntryBefore: null,
     guestlistAlertAt: isoSec(NOW - 2 * HOUR_MS + ALERT_OFFSET),
+    guestConfirmAt: isoSec(NOW - 2 * HOUR_MS + CONFIRM_OFFSET),
 };
 
 let token = '';
+
+const selectConfirmCounts = () =>
+    dbOne<{ kept: string; total: string }>(
+        `select
+            sum(1 + coalesce(cardinality(friends), 0))
+                filter (where guest_confirm_answer is distinct from 'no')::text as kept,
+            sum(1 + coalesce(cardinality(friends), 0))::text as total
+         from party_guestlist where party_id = $1`,
+        [CONFIRM_PARTY_ID],
+    );
 
 async function getParties(query: string): Promise<PartiesResponse> {
     const { result } = await measure(`GET /parties?${query}`, () =>
@@ -223,7 +288,12 @@ describe('e2e: dashboard partiesGetList + partyGetGuestlistList', () => {
             'price null → null (не 0/NaN)',
         );
         assert.equal(ongoing?.googleMapLink, 'https://maps/ongoing', 'googleMapLink отдаётся');
-        assert.deepEqual(ongoing?.time, ONGOING_TIME, 'time: все 4 поля из party_time');
+        assert.deepEqual(ongoing?.time, ONGOING_TIME, 'time: все поля из party_time');
+        assert.equal(
+            byId.get(ID.get('future1') ?? '')?.time?.guestConfirmAt,
+            null,
+            'guest_confirm_at null → guestConfirmAt null',
+        );
         assert.equal(byId.get(ID.get('notime') ?? '')?.time, null, 'без party_time → time null');
 
         // Сверка guestCount напрямую с БД.
@@ -296,13 +366,18 @@ describe('e2e: dashboard partiesGetList + partyGetGuestlistList', () => {
             time: ONGOING_TIME,
         });
 
-        const dbRow = await dbOne<{ start: Date; n: string }>(
-            `select t.party_start_at as start,
+        const dbRow = await dbOne<{ start: Date; confirm: Date; n: string }>(
+            `select t.party_start_at as start, t.guest_confirm_at as confirm,
                 (select sum(1 + coalesce(cardinality(g.friends), 0))::text from party_guestlist g where g.party_id = p.id) as n
              from party p join party_time t on t.party_id = p.id where p.id = $1`,
             [ID.get('ongoing') ?? ''],
         );
         assert.equal(body.time?.startsAt, dbRow?.start.toISOString(), 'time.startsAt = факт БД');
+        assert.equal(
+            body.time?.guestConfirmAt,
+            dbRow?.confirm.toISOString(),
+            'time.guestConfirmAt = факт БД',
+        );
         assert.equal(String(body.guestCount), dbRow?.n, 'guestCount = факт БД');
     });
 
@@ -362,6 +437,76 @@ describe('e2e: dashboard partiesGetList + partyGetGuestlistList', () => {
             ],
             'гости по joined_at asc: guestId, phone, friends (null→[]), joinedAt',
         );
+    });
+
+    it("parties: guestCount не считает гостя с guest_confirm_answer = 'no' вместе с его friends", async () => {
+        const res = await getParties('limit=100');
+        const confirm = res.items.find((p) => p.id === CONFIRM_PARTY_ID);
+        assert.ok(confirm, 'вечеринка с ответами опроса есть в списке');
+
+        const counts = await selectConfirmCounts();
+        assert.equal(counts?.total, '11', "в БД 'no'-гость с 3 friends реально лежит");
+        assert.equal(counts?.kept, String(CONFIRM_EXPECTED_COUNT));
+        assert.equal(
+            confirm.guestCount,
+            CONFIRM_EXPECTED_COUNT,
+            "pending/yes/failed/null + friends учтены, 'no' + friends — нет",
+        );
+    });
+
+    it("party: GET /parties/:id guestCount не считает гостя с guest_confirm_answer = 'no' вместе с его friends", async () => {
+        const { result } = await measure('GET /parties/:id (confirm)', () =>
+            dashboardFetch(
+                new Request(`http://dashboard/parties/${encodeURIComponent(CONFIRM_PARTY_ID)}`, {
+                    headers: { authorization: `Bearer ${token}` },
+                }),
+            ),
+        );
+        assert.equal(result.status, 200);
+        const body = (await result.json()) as PartyItem;
+
+        const counts = await selectConfirmCounts();
+        assert.equal(String(body.guestCount), counts?.kept, 'guestCount = факт БД без no');
+        assert.equal(body.guestCount, CONFIRM_EXPECTED_COUNT);
+    });
+
+    it("guestlist: гость с guest_confirm_answer = 'no' исключён, pending/yes/failed/null на месте", async () => {
+        const { result } = await measure('GET /parties/:id/guestlist (confirm)', () =>
+            dashboardFetch(
+                new Request(
+                    `http://dashboard/parties/${encodeURIComponent(CONFIRM_PARTY_ID)}/guestlist`,
+                    {
+                        headers: { authorization: `Bearer ${token}` },
+                    },
+                ),
+            ),
+        );
+        assert.equal(result.status, 200);
+        const body = (await result.json()) as GuestlistResponse;
+
+        assert.deepEqual(
+            body.map((g) => ({ guestId: g.guestId, friends: g.friends })),
+            CONFIRM_KEPT.map((g) => ({ guestId: g.id, friends: g.friends ?? [] })),
+            'ровно не-no гости по joined_at asc со своими friends',
+        );
+
+        const dbRows = await dbQuery<{ guest_id: string }>(
+            `select guest_id from party_guestlist
+             where party_id = $1 and guest_confirm_answer is distinct from 'no'
+             order by joined_at asc`,
+            [CONFIRM_PARTY_ID],
+        );
+        assert.deepEqual(
+            body.map((g) => g.guestId),
+            dbRows.map((r) => r.guest_id),
+            'guestlist = факт БД без no',
+        );
+        const refused = await dbOne<{ n: string }>(
+            `select count(*)::text as n from party_guestlist
+             where party_id = $1 and guest_id = $2 and guest_confirm_answer = 'no'`,
+            [CONFIRM_PARTY_ID, CONFIRM_GUESTS[0].id],
+        );
+        assert.equal(refused?.n, '1', "'no'-гость лежит в БД, но не отдаётся");
     });
 
     it('guestlist: несуществующий party → 200 []', async () => {

@@ -1,14 +1,14 @@
 // Задача модуля (partyPostHandler):
 //   вход  → POST /party (Bearer JWT, гейт withAuthorization)
 //           body { id, type, name, price ≥0, location, googleMapLink|null, reelsUrl|null, notes|null,
-//                  time?: { startsAt, endsAt, freeEntryBefore?, guestlistAlertAt } }  ISO UTC
+//                  time?: { startsAt, endsAt, freeEntryBefore?, guestlistAlertAt, guestConfirmAt|null } }  ISO UTC
 //   выход → { id }; upsert party (insert → на 23505 update, полная перезапись полей);
 //           time задан → party_time ровно одна строка с новыми значениями; не задан → не трогаем;
 //           marketing_message и party_tables не трогаем;
 //           GET /parties/:id после POST отдаёт все поля тела + guestCount; повтор с теми же
 //           полями и новым именем не меняет googleMapLink и time
 //   бюджет → сеть/БД не меряем, только measure()
-//   негатив → endsAt < startsAt → 400 без записи; параллельные POST одного id → 1 party, 1 party_time;
+//   негатив → endsAt < startsAt → 400 без записи; guestConfirmAt ≥ startsAt → 400 (в .attack); параллельные POST одного id → 1 party, 1 party_time;
 //             auth / кривое тело — в .attack
 
 import assert from 'node:assert/strict';
@@ -37,11 +37,13 @@ const TIME_V1 = {
     endsAt: '2026-12-02T02:00:00.000Z',
     freeEntryBefore: '2026-12-01T20:00:00.000Z',
     guestlistAlertAt: '2026-12-01T14:00:00.000Z',
+    guestConfirmAt: '2026-12-01T10:00:00.000Z',
 };
 const TIME_V2 = {
     startsAt: '2026-12-05T19:00:00.000Z',
     endsAt: '2026-12-06T03:00:00.000Z',
     guestlistAlertAt: '2026-12-05T15:00:00.000Z',
+    guestConfirmAt: null,
 };
 
 const BODY_V1 = {
@@ -72,6 +74,7 @@ interface TimeRow {
     party_end_at: Date | null;
     free_entry_before: Date | null;
     guestlist_alert_at: Date | null;
+    guest_confirm_at: Date | null;
 }
 
 let token = '';
@@ -109,7 +112,7 @@ const selectParty = (id: string) =>
 
 const selectTimes = (id: string) =>
     dbQuery<TimeRow>(
-        `select party_start_at, party_end_at, free_entry_before, guestlist_alert_at
+        `select party_start_at, party_end_at, free_entry_before, guestlist_alert_at, guest_confirm_at
          from party_time where party_id = $1`,
         [id],
     );
@@ -160,6 +163,7 @@ describe('e2e: dashboard partyPost', () => {
                 endsAt: iso(times[0].party_end_at),
                 freeEntryBefore: iso(times[0].free_entry_before),
                 guestlistAlertAt: iso(times[0].guestlist_alert_at),
+                guestConfirmAt: iso(times[0].guest_confirm_at),
             },
             TIME_V1,
         );
@@ -230,6 +234,7 @@ describe('e2e: dashboard partyPost', () => {
                 endsAt: iso(times[0].party_end_at),
                 freeEntryBefore: iso(times[0].free_entry_before),
                 guestlistAlertAt: iso(times[0].guestlist_alert_at),
+                guestConfirmAt: iso(times[0].guest_confirm_at),
             },
             { ...TIME_V2, freeEntryBefore: null },
         );
@@ -250,11 +255,31 @@ describe('e2e: dashboard partyPost', () => {
         assert.equal(iso(times[0].party_start_at), TIME_V2.startsAt, 'время от прошлого POST');
     });
 
+    it('e2e: partyPost — повтор меняет guestConfirmAt: null → ISO → другой ISO', async () => {
+        const selectConfirm = async () => {
+            const times = await selectTimes(PARTY_ID);
+            assert.equal(times.length, 1, 'party_time одна');
+            return iso(times[0].guest_confirm_at);
+        };
+        assert.equal(await selectConfirm(), null, 'исходно null от прошлого POST');
+
+        for (const guestConfirmAt of ['2026-12-05T09:00:00.000Z', '2026-12-04T12:30:00.000Z']) {
+            const res = await post({ ...BODY_V1, time: { ...TIME_V2, guestConfirmAt } });
+            assert.equal(res.status, 200);
+            assert.equal(await selectConfirm(), guestConfirmAt);
+        }
+    });
+
     it('e2e: partyPost — endsAt < startsAt → 400, ничего не записано', async () => {
         const res = await post({
             ...BODY_V1,
             id: BAD_ID,
-            time: { startsAt: TIME_V1.endsAt, endsAt: TIME_V1.startsAt },
+            time: {
+                startsAt: TIME_V1.endsAt,
+                endsAt: TIME_V1.startsAt,
+                guestlistAlertAt: TIME_V1.guestlistAlertAt,
+                guestConfirmAt: null,
+            },
         });
         assert.equal(res.status, 400);
         assert.equal(await selectParty(BAD_ID), null);

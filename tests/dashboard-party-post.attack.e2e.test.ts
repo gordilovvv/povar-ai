@@ -3,6 +3,8 @@
 //   auth: нет/битый/протухший/чужая подпись/удалённый юзер → 401, в БД ничего не записано;
 //   400: не-JSON, нет ключей, неверные типы, price < 0, кривой enum, кривой slug (SQL-мета, upper),
 //        невалидный ISO, endsAt < startsAt, time без guestlistAlertAt — и в БД ничего (ни party, ни party_time);
+//   guestConfirmAt: ключ обязателен; null → null в БД; ISO строго < startsAt; ≥ startsAt / не ISO UTC / не строка → 400,
+//        при 400 в БД ничего не меняется (ни party, ни party_time);
 //   инъекции в текстовых полях хранятся как есть, таблицы целы;
 //   параллельные POST одного id (новый и существующий, с разным time) → ровно 1 party и 1 party_time;
 //   marketing_message и party_tables не трогаются.
@@ -36,6 +38,7 @@ const TIME = {
     startsAt: '2026-12-01T18:00:00.000Z',
     endsAt: '2026-12-02T02:00:00.000Z',
     guestlistAlertAt: '2026-12-01T14:00:00.000Z',
+    guestConfirmAt: '2026-12-01T10:00:00.000Z',
 };
 const BODY = {
     id: BAD_ID,
@@ -58,7 +61,9 @@ function jwtSecret(): string {
 }
 
 async function postRaw(body: string, auth: string | null = `Bearer ${token}`): Promise<Response> {
-    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    const headers: Record<string, string> = {
+        'content-type': 'application/json',
+    };
     if (auth !== null) headers.authorization = auth;
     return dashboardFetch(new Request('http://dashboard/party', { method: 'POST', headers, body }));
 }
@@ -162,11 +167,21 @@ describe('attack: dashboard partyPost', () => {
             ['guestlistAlertAt null', { ...BODY, time: { ...TIME, guestlistAlertAt: null } }],
             [
                 'time no guestlistAlertAt',
-                { ...BODY, time: { startsAt: TIME.startsAt, endsAt: TIME.endsAt } },
+                {
+                    ...BODY,
+                    time: {
+                        startsAt: TIME.startsAt,
+                        endsAt: TIME.endsAt,
+                        guestConfirmAt: TIME.guestConfirmAt,
+                    },
+                },
             ],
             [
                 'endsAt < startsAt',
-                { ...BODY, time: { ...TIME, startsAt: TIME.endsAt, endsAt: TIME.startsAt } },
+                {
+                    ...BODY,
+                    time: { ...TIME, startsAt: TIME.endsAt, endsAt: TIME.startsAt },
+                },
             ],
             [
                 'endsAt < startsAt внутри секунды',
@@ -250,11 +265,160 @@ describe('attack: dashboard partyPost', () => {
         assert.deepEqual(await countRows(INJ_ID), { party: 1, time: 1 });
     });
 
+    const CONF_ID = BAD_ID;
+    const selectTime = (id: string) =>
+        dbOne<{ s: Date; c: Date | null }>(
+            `select party_start_at s, guest_confirm_at c from party_time where party_id = $1`,
+            [id],
+        );
+
+    it('guestConfirmAt: кривое значение / нет ключа / >= startsAt → 400, новой записи нет', async () => {
+        const { guestConfirmAt: _c, ...noConfirm } = TIME;
+        const cases: [string, unknown][] = [
+            ['нет ключа', noConfirm],
+            ['undefined', { ...TIME, guestConfirmAt: undefined }],
+            ['равно startsAt', { ...TIME, guestConfirmAt: TIME.startsAt }],
+            ['равно startsAt без мс', { ...TIME, guestConfirmAt: '2026-12-01T18:00:00Z' }],
+            ['позже startsAt на 1мс', { ...TIME, guestConfirmAt: '2026-12-01T18:00:00.001Z' }],
+            ['позже startsAt', { ...TIME, guestConfirmAt: TIME.endsAt }],
+            ['пустая строка', { ...TIME, guestConfirmAt: '' }],
+            ['мусор', { ...TIME, guestConfirmAt: 'tomorrow' }],
+            ['число', { ...TIME, guestConfirmAt: 1764583200000 }],
+            ['true', { ...TIME, guestConfirmAt: true }],
+            ['объект', { ...TIME, guestConfirmAt: { at: TIME.guestConfirmAt } }],
+            ['массив', { ...TIME, guestConfirmAt: [TIME.guestConfirmAt] }],
+            ['offset', { ...TIME, guestConfirmAt: '2026-12-01T14:00:00+04:00' }],
+            ['без tz', { ...TIME, guestConfirmAt: '2026-12-01T10:00:00' }],
+            ['только дата', { ...TIME, guestConfirmAt: '2026-12-01' }],
+            ['30 февраля', { ...TIME, guestConfirmAt: '2026-02-30T10:00:00Z' }],
+            ['25 час', { ...TIME, guestConfirmAt: '2026-12-01T25:00:00Z' }],
+            [
+                'SQL-мета',
+                {
+                    ...TIME,
+                    guestConfirmAt: `2026-12-01T10:00:00Z'); drop table party_time; --`,
+                },
+            ],
+            ['NUL', { ...TIME, guestConfirmAt: '2026-12-01T10:00:00Z\u0000' }],
+            ['пробелы', { ...TIME, guestConfirmAt: ' 2026-12-01T10:00:00Z ' }],
+        ];
+        for (const [label, time] of cases) {
+            const res = await post({ ...BODY, id: CONF_ID, time });
+            assert.equal(res.status, 400, `${label} → 400`);
+            assert.deepEqual(
+                await countRows(CONF_ID),
+                { party: 0, time: 0 },
+                `${label}: без записи`,
+            );
+        }
+        assert.equal(
+            (await dbOne<{ t: string }>(`select to_regclass('public.party_time')::text t`))?.t,
+            'party_time',
+        );
+    });
+
+    it('guestConfirmAt: 400 на существующей party не трогает ни party, ни party_time', async () => {
+        assert.equal((await post({ ...BODY, id: CONF_ID })).status, 200);
+        const before = await selectTime(CONF_ID);
+        assert.equal(before?.c?.toISOString(), TIME.guestConfirmAt);
+        const NEW_START = '2026-12-03T18:00:00.000Z';
+        for (const guestConfirmAt of [NEW_START, '2026-12-05T00:00:00.000Z', 'x', 5, undefined]) {
+            const res = await post({
+                ...BODY,
+                id: CONF_ID,
+                name: 'E2E atk changed',
+                time: {
+                    ...TIME,
+                    startsAt: NEW_START,
+                    endsAt: '2026-12-04T02:00:00.000Z',
+                    guestConfirmAt,
+                },
+            });
+            assert.equal(res.status, 400, `${guestConfirmAt} → 400`);
+            const p = await dbOne<{ name: string }>(`select name from party where id = $1`, [
+                CONF_ID,
+            ]);
+            assert.equal(p?.name, BODY.name, 'party не перезаписана');
+            assert.deepEqual(await selectTime(CONF_ID), before, 'party_time не перезаписан');
+            assert.deepEqual(await countRows(CONF_ID), { party: 1, time: 1 });
+        }
+        await withClient(async (c) => {
+            await c.query(`delete from party_time where party_id = $1`, [CONF_ID]);
+            await c.query(`delete from party where id = $1`, [CONF_ID]);
+        });
+    });
+
+    it('guestConfirmAt: null затирает прежний ISO в БД, а не оставляет старое', async () => {
+        assert.equal((await post({ ...BODY, id: CONF_ID })).status, 200);
+        assert.equal((await selectTime(CONF_ID))?.c?.toISOString(), TIME.guestConfirmAt);
+        const res = await post({
+            ...BODY,
+            id: CONF_ID,
+            time: { ...TIME, guestConfirmAt: null },
+        });
+        assert.equal(res.status, 200);
+        const t = await selectTime(CONF_ID);
+        assert.equal(t?.c, null, 'guest_confirm_at = null');
+        assert.deepEqual(await countRows(CONF_ID), { party: 1, time: 1 });
+        await withClient(async (c) => {
+            await c.query(`delete from party_time where party_id = $1`, [CONF_ID]);
+            await c.query(`delete from party where id = $1`, [CONF_ID]);
+        });
+    });
+
+    it('guestConfirmAt: принятый в пределах секунды до startsAt — в БД строго раньше party_start_at', async () => {
+        const res = await post({
+            ...BODY,
+            id: CONF_ID,
+            time: {
+                ...TIME,
+                startsAt: '2026-12-01T18:00:00.900Z',
+                guestConfirmAt: '2026-12-01T18:00:00.100Z',
+            },
+        });
+        if (res.status === 200) {
+            const t = await selectTime(CONF_ID);
+            assert.ok(
+                t?.c && t.c < t.s,
+                `в БД confirm ${t?.c?.toISOString()} должен быть < start ${t?.s.toISOString()}`,
+            );
+        } else {
+            assert.equal(res.status, 400);
+            assert.deepEqual(await countRows(CONF_ID), { party: 0, time: 0 });
+        }
+        await withClient(async (c) => {
+            await c.query(`delete from party_time where party_id = $1`, [CONF_ID]);
+            await c.query(`delete from party where id = $1`, [CONF_ID]);
+        });
+    });
+
+    it('guestConfirmAt: на 1мс раньше через границу секунды → 200, в БД на секунду раньше start', async () => {
+        const res = await post({
+            ...BODY,
+            id: CONF_ID,
+            time: {
+                ...TIME,
+                startsAt: '2026-12-01T18:00:00.000Z',
+                guestConfirmAt: '2026-12-01T17:59:59.999Z',
+            },
+        });
+        assert.equal(res.status, 200);
+        const t = await selectTime(CONF_ID);
+        assert.equal(t?.s.toISOString(), '2026-12-01T18:00:00.000Z');
+        assert.equal(t?.c?.toISOString(), '2026-12-01T17:59:59.000Z');
+        await withClient(async (c) => {
+            await c.query(`delete from party_time where party_id = $1`, [CONF_ID]);
+            await c.query(`delete from party where id = $1`, [CONF_ID]);
+        });
+    });
+
     const raceTimes = (n: number) =>
         Array.from({ length: n }, (_, i) => ({
             startsAt: `2026-12-${String(i + 1).padStart(2, '0')}T18:00:00.000Z`,
             endsAt: `2026-12-${String(i + 1).padStart(2, '0')}T23:00:00.000Z`,
             guestlistAlertAt: `2026-12-${String(i + 1).padStart(2, '0')}T12:00:00.000Z`,
+            guestConfirmAt:
+                i % 2 ? null : `2026-12-${String(i + 1).padStart(2, '0')}T09:00:00.000Z`,
         }));
 
     async function assertRace(
@@ -281,8 +445,8 @@ describe('attack: dashboard partyPost', () => {
         const p = await dbOne<{ name: string }>(`select name from party where id = $1`, [
             RACE_NEW_ID,
         ]);
-        const t = await dbOne<{ s: Date }>(
-            `select party_start_at s from party_time where party_id = $1`,
+        const t = await dbOne<{ s: Date; c: Date | null }>(
+            `select party_start_at s, guest_confirm_at c from party_time where party_id = $1`,
             [RACE_NEW_ID],
         );
         const winner = Number(p?.name.replace('race ', ''));
@@ -290,6 +454,11 @@ describe('attack: dashboard partyPost', () => {
             t?.s.toISOString(),
             times[winner].startsAt,
             'party и party_time от одного победителя',
+        );
+        assert.equal(
+            t?.c ? t.c.toISOString() : null,
+            times[winner].guestConfirmAt,
+            'guest_confirm_at от того же победителя',
         );
     });
 

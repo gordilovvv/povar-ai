@@ -33,12 +33,14 @@ const LATE = {
     end: NOW + 54 * HOUR_MS,
     free: NOW + 49 * HOUR_MS,
     alert: NOW + 40 * HOUR_MS,
+    confirm: (NOW + 36 * HOUR_MS) as number | null,
 };
 const EARLY = {
     start: NOW + 24 * HOUR_MS,
     end: NOW + 30 * HOUR_MS,
     free: null,
     alert: NOW + 20 * HOUR_MS,
+    confirm: null as number | null,
 };
 const isoSec = (ms: number) => new Date(Math.floor(ms / 1000) * 1000).toISOString();
 
@@ -47,6 +49,7 @@ interface PartyTime {
     endsAt: string | null;
     freeEntryBefore: string | null;
     guestlistAlertAt: string | null;
+    guestConfirmAt: string | null;
 }
 interface PartyBody {
     id: string;
@@ -101,14 +104,15 @@ async function seed(): Promise<void> {
         );
         for (const t of [LATE, EARLY]) {
             await client.query(
-                `insert into party_time (party_id, party_start_at, party_end_at, free_entry_before, guestlist_alert_at)
-                 values ($1, $2, $3, $4, $5)`,
+                `insert into party_time (party_id, party_start_at, party_end_at, free_entry_before, guestlist_alert_at, guest_confirm_at)
+                 values ($1, $2, $3, $4, $5, $6)`,
                 [
                     MULTI_ID,
                     toDateTime(new Date(t.start)),
                     toDateTime(new Date(t.end)),
                     t.free === null ? null : toDateTime(new Date(t.free)),
                     toDateTime(new Date(t.alert)),
+                    t.confirm === null ? null : toDateTime(new Date(t.confirm)),
                 ],
             );
         }
@@ -270,6 +274,7 @@ describe('attack: dashboard partyGet', () => {
             endsAt: isoSec(EARLY.end),
             freeEntryBefore: null,
             guestlistAlertAt: isoSec(EARLY.alert),
+            guestConfirmAt: null,
         });
 
         const db = await dbOne<{
@@ -289,6 +294,13 @@ describe('attack: dashboard partyGet', () => {
         assert.equal(body.time?.endsAt, db.e.toISOString());
         assert.equal(body.time?.freeEntryBefore, db.f ? db.f.toISOString() : null);
         assert.equal(body.time?.guestlistAlertAt, db.a.toISOString());
+        const late = await dbOne<{ c: Date | null }>(
+            `select guest_confirm_at c from party_time where party_id = $1
+             order by party_start_at desc limit 1`,
+            [MULTI_ID],
+        );
+        assert.ok(late?.c, 'у поздней party_time confirm задан — ранняя с null должна победить');
+        assert.equal(body.time?.guestConfirmAt, null, 'guestConfirmAt от ранней party_time');
         assert.equal(String(body.guestCount), db.n, 'guestCount = факт БД, не ×2 от party_time');
         assert.equal(db.n, '1');
     });
@@ -337,6 +349,7 @@ describe('attack: dashboard partyGet', () => {
         assert.ok(multi);
         assert.equal(multi.time?.startsAt, isoSec(EARLY.start), 'в списке — ранняя party_time');
         assert.equal(multi.time?.endsAt, isoSec(EARLY.end));
+        assert.equal(multi.time?.guestConfirmAt, null, 'guestConfirmAt в списке от ранней time');
         assert.equal(multi.guestCount, 1);
     });
 });

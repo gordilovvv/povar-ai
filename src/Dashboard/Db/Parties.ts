@@ -17,6 +17,7 @@ export interface PartyRow {
     ends_at: string | null;
     free_entry_before: string | null;
     guestlist_alert_at: string | null;
+    guest_confirm_at: string | null;
     guest_count: string;
 }
 
@@ -63,11 +64,13 @@ export const selectPartiesList = async (
                     time.party_end_at as ends_at,
                     time.free_entry_before,
                     time.guestlist_alert_at,
+                    time.guest_confirm_at,
                     (select coalesce(sum(1 + coalesce(cardinality(guest.friends), 0)), 0)
-                        from party_guestlist guest where guest.party_id = party.id) as guest_count
+                        from party_guestlist guest where guest.party_id = party.id
+                            and guest.guest_confirm_answer is distinct from 'no') as guest_count
                 from party
                 left join lateral (
-                    select party_id, party_start_at, party_end_at, free_entry_before, guestlist_alert_at
+                    select party_id, party_start_at, party_end_at, free_entry_before, guestlist_alert_at, guest_confirm_at
                     from party_time where party_id = party.id
                     order by party_start_at asc limit 1
                 ) time on true
@@ -131,11 +134,13 @@ export const selectParty = async (client: PoolClient, partyId: string) => {
                 time.party_end_at as ends_at,
                 time.free_entry_before,
                 time.guestlist_alert_at,
+                time.guest_confirm_at,
                 (select coalesce(sum(1 + coalesce(cardinality(guest.friends), 0)), 0)
-                    from party_guestlist guest where guest.party_id = party.id) as guest_count
+                    from party_guestlist guest where guest.party_id = party.id
+                            and guest.guest_confirm_answer is distinct from 'no') as guest_count
             from party
             left join lateral (
-                select party_id, party_start_at, party_end_at, free_entry_before, guestlist_alert_at
+                select party_id, party_start_at, party_end_at, free_entry_before, guestlist_alert_at, guest_confirm_at
                 from party_time where party_id = party.id
                 order by party_start_at asc limit 1
             ) time on true
@@ -155,6 +160,7 @@ export const selectPartyGuestlist = async (client: PoolClient, partyId: string) 
             from party_guestlist list
             join guests guest on guest.id = list.guest_id
             where list.party_id = %L
+                and list.guest_confirm_answer is distinct from 'no'
             order by list.joined_at asc nulls last, list.guest_id asc`,
             partyId,
         ),
@@ -182,6 +188,7 @@ export interface PartyTimeStorage {
     party_end_at: string;
     free_entry_before: string | null;
     guestlist_alert_at: string;
+    guest_confirm_at: string | null;
 }
 
 export const insertParty = async (client: PoolClient, party: PartyStorage) => {
@@ -227,14 +234,16 @@ export const replacePartyTime = async (client: PoolClient, time: PartyTimeStorag
         format(
             `with removed as (delete from party_time where party_id = %1$L)
             insert into party_time
-                (party_id, party_start_at, party_end_at, free_entry_before, guestlist_alert_at)
+                (party_id, party_start_at, party_end_at, free_entry_before, guestlist_alert_at,
+                    guest_confirm_at)
             values
-                (%1$L, %2$L, %3$L, %4$L, %5$L)`,
+                (%1$L, %2$L, %3$L, %4$L, %5$L, %6$L)`,
             time.party_id,
             time.party_start_at,
             time.party_end_at,
             time.free_entry_before,
             time.guestlist_alert_at,
+            time.guest_confirm_at,
         ),
     );
 };

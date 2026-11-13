@@ -42,7 +42,8 @@ export const partiesGetChartHandler: RequestHandler<IRequest> = async (request) 
                         (select min(time.party_start_at)
                             from party_time time where time.party_id = party.id) as starts_at,
                         (select coalesce(sum(1 + coalesce(cardinality(guest.friends), 0)), 0)
-                            from party_guestlist guest where guest.party_id = party.id) as guest_count
+                            from party_guestlist guest where guest.party_id = party.id
+                                and guest.guest_confirm_answer is distinct from 'no') as guest_count
                     from party
                 )
                 select id, name, starts_at, guest_count

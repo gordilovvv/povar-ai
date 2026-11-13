@@ -30,6 +30,7 @@ export const partyGetGuestlistChartHandler: RequestHandler<IRequest> = async (re
                     sum(1 + coalesce(cardinality(friends), 0)) as count
                 from party_guestlist
                 where party_id = %L and joined_at is not null
+                    and guest_confirm_answer is distinct from 'no'
                 group by 1
                 order by 1`,
                 partyId,

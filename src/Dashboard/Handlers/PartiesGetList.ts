@@ -25,6 +25,7 @@ interface PartyTime {
     endsAt: string | null;
     freeEntryBefore: string | null;
     guestlistAlertAt: string | null;
+    guestConfirmAt: string | null;
 }
 
 export const partiesGetListHandler: RequestHandler<IRequest> = async (request) => {
@@ -70,6 +71,7 @@ export const partiesGetListHandler: RequestHandler<IRequest> = async (request) =
                           endsAt: fromDateTime(row.ends_at),
                           freeEntryBefore: fromDateTime(row.free_entry_before),
                           guestlistAlertAt: fromDateTime(row.guestlist_alert_at),
+                          guestConfirmAt: fromDateTime(row.guest_confirm_at),
                       },
         });
     }

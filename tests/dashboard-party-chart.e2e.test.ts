@@ -10,15 +10,34 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { pool as dashboardPool } from '#Dashboard/Db/Pool.js';
 import { dashboardFetch } from '#Dashboard/Router.js';
-import { closePool, measure, seedDashboardUser, signAuthToken, withClient } from './helpers/e2e.ts';
+import {
+    closePool,
+    dbOne,
+    dbQuery,
+    measure,
+    seedDashboardUser,
+    signAuthToken,
+    withClient,
+} from './helpers/e2e.ts';
 
 const DASH_PHONE = 'E2E_partychart_user';
 const RUN = Date.now().toString(36);
 const FULL_ID = `e2e_pc_full_${RUN}`;
 const EMPTY_ID = `e2e_pc_empty_${RUN}`;
 const OUTSIDE_ID = `e2e_pc_outside_${RUN}`;
-const PARTY_IDS = [FULL_ID, EMPTY_ID, OUTSIDE_ID];
-const GUEST_IDS = [1, 2, 3].map((n) => `e2e_pc_guest${n}_${RUN}`);
+const CONFIRM_ID = `e2e_pc_confirm_${RUN}`;
+const PARTY_IDS = [FULL_ID, EMPTY_ID, OUTSIDE_ID, CONFIRM_ID];
+const CONFIRM_GUESTS: { answer: string | null; joinedAt: string; friends: string[] | null }[] = [
+    { answer: 'no', joinedAt: '2030-03-01T10:00:00Z', friends: ['No F1', 'No F2', 'No F3'] },
+    { answer: 'pending', joinedAt: '2030-03-02T10:00:00Z', friends: ['Pending F1'] },
+    { answer: 'yes', joinedAt: '2030-03-02T11:00:00Z', friends: null },
+    { answer: 'failed', joinedAt: '2030-03-03T10:00:00Z', friends: ['Failed F1', 'Failed F2'] },
+    { answer: null, joinedAt: '2030-03-03T11:00:00Z', friends: null },
+];
+const CONFIRM_GUEST_IDS = CONFIRM_GUESTS.map((_, i) => `e2e_pc_cguest${i}_${RUN}`);
+const GUEST_IDS = [...[1, 2, 3].map((n) => `e2e_pc_guest${n}_${RUN}`), ...CONFIRM_GUEST_IDS];
+const CONFIRM_FROM = '2030-03-01T00:00:00.000Z';
+const CONFIRM_TO = '2030-04-01T00:00:00.000Z';
 
 const FROM = '2030-01-01T00:00:00.000Z';
 const TO = '2030-02-01T00:00:00.000Z';
@@ -55,6 +74,7 @@ describe('e2e: dashboard party charts', () => {
                 [FULL_ID, '2030-01-10T18:00:00Z'],
                 [EMPTY_ID, '2030-01-05T18:00:00Z'],
                 [OUTSIDE_ID, '2030-02-01T00:00:00Z'],
+                [CONFIRM_ID, '2030-03-10T18:00:00Z'],
             ];
             for (const [id, startsAt] of parties) {
                 await client.query(
@@ -81,6 +101,16 @@ describe('e2e: dashboard party charts', () => {
                     [FULL_ID, guestId, joinedAt, friends],
                 );
             }
+            for (const [i, guest] of CONFIRM_GUESTS.entries()) {
+                await client.query(`insert into guests (id, first_name) values ($1, 'E2E')`, [
+                    CONFIRM_GUEST_IDS[i],
+                ]);
+                await client.query(
+                    `insert into party_guestlist (party_id, guest_id, joined_at, friends, guest_confirm_answer)
+                     values ($1, $2, $3, $4, $5)`,
+                    [CONFIRM_ID, CONFIRM_GUEST_IDS[i], guest.joinedAt, guest.friends, guest.answer],
+                );
+            }
         });
     });
 
@@ -103,6 +133,65 @@ describe('e2e: dashboard party charts', () => {
         const res = await get(`/parties/e2e_pc_missing_${RUN}/guestlist/chart`);
         assert.equal(res.status, 200);
         assert.deepEqual(await res.json(), []);
+    });
+
+    it("e2e: guestlistChart — гость с guest_confirm_answer = 'no' и его friends не считаются", async () => {
+        const res = await get(`/parties/${CONFIRM_ID}/guestlist/chart`);
+        assert.equal(res.status, 200);
+        const body = await res.json();
+        assert.deepEqual(
+            body,
+            [
+                { date: '2030-03-02', count: 3 },
+                { date: '2030-03-03', count: 4 },
+            ],
+            "день только с 'no'-гостем выпал, pending/yes/failed/null + friends на месте",
+        );
+
+        const dbRows = await dbQuery<{ date: string; count: number; refused: number }>(
+            `select to_char((joined_at at time zone 'Asia/Dubai')::date, 'YYYY-MM-DD') as date,
+                (sum(1 + coalesce(cardinality(friends), 0))
+                    filter (where guest_confirm_answer is distinct from 'no'))::int as count,
+                (sum(1 + coalesce(cardinality(friends), 0))
+                    filter (where guest_confirm_answer = 'no'))::int as refused
+             from party_guestlist where party_id = $1 group by 1 order by 1`,
+            [CONFIRM_ID],
+        );
+        assert.equal(
+            dbRows.find((r) => r.date === '2030-03-01')?.refused,
+            4,
+            "в БД 'no'-гость с friends лежит 2030-03-01",
+        );
+        assert.deepEqual(
+            body,
+            dbRows.filter((r) => r.count !== null).map((r) => ({ date: r.date, count: r.count })),
+            'график = факт БД без no',
+        );
+    });
+
+    it("e2e: partiesChart — гость с guest_confirm_answer = 'no' и его friends не в guestCount", async () => {
+        const res = await get(`/parties/chart?from=${CONFIRM_FROM}&to=${CONFIRM_TO}`);
+        assert.equal(res.status, 200);
+        const body = (await res.json()) as { id: string; guestCount: number }[];
+        assert.deepEqual(body, [
+            {
+                id: CONFIRM_ID,
+                name: CONFIRM_ID,
+                startsAt: '2030-03-10T18:00:00.000Z',
+                guestCount: 7,
+            },
+        ]);
+
+        const counts = await dbOne<{ kept: number; total: number }>(
+            `select
+                (sum(1 + coalesce(cardinality(friends), 0))
+                    filter (where guest_confirm_answer is distinct from 'no'))::int as kept,
+                sum(1 + coalesce(cardinality(friends), 0))::int as total
+             from party_guestlist where party_id = $1`,
+            [CONFIRM_ID],
+        );
+        assert.deepEqual(counts, { kept: 7, total: 11 }, "в БД 'no'-гость с 3 friends лежит");
+        assert.equal(body[0].guestCount, counts?.kept, 'guestCount = факт БД без no');
     });
 
     it('e2e: partiesChart — окно [from, to): по startsAt asc, без гостей 0, граница to исключена', async () => {

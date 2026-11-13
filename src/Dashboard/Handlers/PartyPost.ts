@@ -35,8 +35,15 @@ const bodySchema = z.object({
             endsAt: isoUtc,
             freeEntryBefore: isoUtc.optional(),
             guestlistAlertAt: isoUtc,
+            guestConfirmAt: isoUtc.nullable(),
         })
         .refine((time) => Date.parse(time.endsAt) >= Date.parse(time.startsAt))
+        .refine(
+            (time) =>
+                time.guestConfirmAt === null ||
+                // toDateTime режет миллисекунды: сравнение по ms пропустило бы равенство в базе
+                toDateTime(time.guestConfirmAt) < toDateTime(time.startsAt),
+        )
         .optional(),
 });
 
@@ -85,6 +92,9 @@ export const partyPostHandler: RequestHandler<IRequest> = async (request) => {
                     ? toDateTime(body.time.freeEntryBefore)
                     : null,
                 guestlist_alert_at: toDateTime(body.time.guestlistAlertAt),
+                guest_confirm_at: body.time.guestConfirmAt
+                    ? toDateTime(body.time.guestConfirmAt)
+                    : null,
             });
         }
         await client.query('commit');
